@@ -9,7 +9,7 @@ export interface JmapSession {
 
 export interface JmapRequest {
   using: string[];
-  methodCalls: Array<[string, any, string]>;
+  methodCalls: [string, any, string][];
 }
 
 export interface JmapResponse {

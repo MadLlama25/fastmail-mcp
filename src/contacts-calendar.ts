@@ -1,11 +1,11 @@
-import { JmapClient } from './jmap-client.js';
+import { JmapClient, JmapRequest } from './jmap-client.js';
 
 export class ContactsCalendarClient extends JmapClient {
   
   async getContacts(limit: number = 50): Promise<any[]> {
     const session = await this.getSession();
     
-    const request = {
+    const request: JmapRequest = {
       using: ['urn:ietf:params:jmap:core', 'com:fastmail:contacts'],
       methodCalls: [
         ['Contact/query', {
@@ -27,7 +27,7 @@ export class ContactsCalendarClient extends JmapClient {
   async getContactById(id: string): Promise<any> {
     const session = await this.getSession();
     
-    const request = {
+    const request: JmapRequest = {
       using: ['urn:ietf:params:jmap:core', 'com:fastmail:contacts'],
       methodCalls: [
         ['Contact/get', {
@@ -44,7 +44,7 @@ export class ContactsCalendarClient extends JmapClient {
   async searchContacts(query: string, limit: number = 20): Promise<any[]> {
     const session = await this.getSession();
     
-    const request = {
+    const request: JmapRequest = {
       using: ['urn:ietf:params:jmap:core', 'com:fastmail:contacts'],
       methodCalls: [
         ['Contact/query', {
@@ -67,7 +67,7 @@ export class ContactsCalendarClient extends JmapClient {
   async getCalendars(): Promise<any[]> {
     const session = await this.getSession();
     
-    const request = {
+    const request: JmapRequest = {
       using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:calendars'],
       methodCalls: [
         ['Calendar/get', {
@@ -85,7 +85,7 @@ export class ContactsCalendarClient extends JmapClient {
     
     const filter = calendarId ? { inCalendar: calendarId } : {};
     
-    const request = {
+    const request: JmapRequest = {
       using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:calendars'],
       methodCalls: [
         ['CalendarEvent/query', {
@@ -109,7 +109,7 @@ export class ContactsCalendarClient extends JmapClient {
   async getCalendarEventById(id: string): Promise<any> {
     const session = await this.getSession();
     
-    const request = {
+    const request: JmapRequest = {
       using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:calendars'],
       methodCalls: [
         ['CalendarEvent/get', {
@@ -144,7 +144,7 @@ export class ContactsCalendarClient extends JmapClient {
       participants: event.participants || []
     };
 
-    const request = {
+    const request: JmapRequest = {
       using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:calendars'],
       methodCalls: [
         ['CalendarEvent/set', {

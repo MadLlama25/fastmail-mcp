@@ -7,7 +7,7 @@ import {
   McpError,
 } from '@modelcontextprotocol/sdk/types.js';
 import { FastmailAuth, FastmailConfig } from './auth.js';
-import { JmapClient } from './jmap-client.js';
+import { JmapClient, JmapRequest } from './jmap-client.js';
 import { ContactsCalendarClient } from './contacts-calendar.js';
 
 const server = new Server(
@@ -393,7 +393,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         // For search, we'll use the Email/query method with a text filter
         const session = await client.getSession();
-        const request = {
+        const request: JmapRequest = {
           using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
           methodCalls: [
             ['Email/query', {
