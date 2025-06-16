@@ -50,6 +50,32 @@ export class JmapClient {
     return this.session;
   }
 
+  async getUserEmail(): Promise<string> {
+    const session = await this.getSession();
+    
+    // Try to get the user's primary email from the Identity object
+    const request: JmapRequest = {
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:submission'],
+      methodCalls: [
+        ['Identity/get', {
+          accountId: session.accountId
+        }, 'identities']
+      ]
+    };
+
+    try {
+      const response = await this.makeRequest(request);
+      const identities = response.methodResponses[0][1].list;
+      
+      // Find the default identity or use the first one
+      const defaultIdentity = identities.find((id: any) => id.mayDelete === false) || identities[0];
+      return defaultIdentity?.email || 'user@example.com';
+    } catch (error) {
+      // Fallback if Identity/get is not available
+      return 'user@example.com';
+    }
+  }
+
   async makeRequest(request: JmapRequest): Promise<JmapResponse> {
     const session = await this.getSession();
     
@@ -131,11 +157,15 @@ export class JmapClient {
     subject: string;
     textBody?: string;
     htmlBody?: string;
+    from?: string;
   }): Promise<string> {
     const session = await this.getSession();
 
+    // Get the primary email address from session if not provided
+    const fromEmail = email.from || await this.getUserEmail();
+
     const emailObject = {
-      from: [{ email: 'user@example.com' }], // This should be configured
+      from: [{ email: fromEmail }],
       to: email.to.map(addr => ({ email: addr })),
       cc: email.cc?.map(addr => ({ email: addr })) || [],
       bcc: email.bcc?.map(addr => ({ email: addr })) || [],
@@ -161,7 +191,7 @@ export class JmapClient {
             submission: {
               emailId: '#draft',
               envelope: {
-                mailFrom: { email: 'user@example.com' },
+                mailFrom: { email: fromEmail },
                 rcptTo: email.to.map(addr => ({ email: addr }))
               }
             }
@@ -171,6 +201,19 @@ export class JmapClient {
     };
 
     const response = await this.makeRequest(request);
-    return response.methodResponses[1][1].created.submission.id;
+    
+    // Check if email creation was successful
+    const emailResult = response.methodResponses[0][1];
+    if (emailResult.notCreated && emailResult.notCreated.draft) {
+      throw new Error(`Failed to create email: ${JSON.stringify(emailResult.notCreated.draft)}`);
+    }
+    
+    // Check if email submission was successful
+    const submissionResult = response.methodResponses[1][1];
+    if (submissionResult.notCreated && submissionResult.notCreated.submission) {
+      throw new Error(`Failed to submit email: ${JSON.stringify(submissionResult.notCreated.submission)}`);
+    }
+    
+    return submissionResult.created?.submission?.id || 'unknown';
   }
 }
