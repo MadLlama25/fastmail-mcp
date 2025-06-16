@@ -567,6 +567,25 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           properties: {},
         },
       },
+      {
+        name: 'test_bulk_operations',
+        description: 'Test bulk operations by finding recent emails and performing safe operations (mark read/unread)',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            dryRun: {
+              type: 'boolean',
+              description: 'If true, only shows what would be done without making changes (default: true)',
+              default: true,
+            },
+            limit: {
+              type: 'number',
+              description: 'Number of emails to test with (default: 3, max: 10)',
+              default: 3,
+            },
+          },
+        },
+      },
     ],
   };
 });
@@ -1072,14 +1091,32 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             functions: ['list_contacts', 'get_contact', 'search_contacts'],
             note: session.capabilities['urn:ietf:params:jmap:contacts'] ? 
               'Contacts are available' : 
-              'Contacts access not available - may require enabling in Fastmail account settings'
+              'Contacts access not available - may require enabling in Fastmail account settings',
+            enablementGuide: session.capabilities['urn:ietf:params:jmap:contacts'] ? null : {
+              steps: [
+                '1. Log into Fastmail web interface',
+                '2. Go to Settings → Privacy & Security → Connected Apps & API tokens',
+                '3. Check if contacts scope is enabled for your API token',
+                '4. If not available, you may need to upgrade your Fastmail plan or contact support'
+              ],
+              documentation: 'https://www.fastmail.com/help/technical/jmap-api.html'
+            }
           },
           calendar: {
             available: !!session.capabilities['urn:ietf:params:jmap:calendars'],
             functions: ['list_calendars', 'list_calendar_events', 'get_calendar_event', 'create_calendar_event'],
             note: session.capabilities['urn:ietf:params:jmap:calendars'] ? 
               'Calendar is available' : 
-              'Calendar access not available - may require enabling in Fastmail account settings'
+              'Calendar access not available - may require enabling in Fastmail account settings',
+            enablementGuide: session.capabilities['urn:ietf:params:jmap:calendars'] ? null : {
+              steps: [
+                '1. Log into Fastmail web interface',
+                '2. Go to Settings → Privacy & Security → Connected Apps & API tokens',
+                '3. Check if calendar scope is enabled for your API token',
+                '4. If not available, you may need to upgrade your Fastmail plan or contact support'
+              ],
+              documentation: 'https://www.fastmail.com/help/technical/jmap-api.html'
+            }
           },
           capabilities: Object.keys(session.capabilities)
         };
@@ -1092,6 +1129,100 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             },
           ],
         };
+      }
+
+      case 'test_bulk_operations': {
+        const { dryRun = true, limit = 3 } = args as any;
+        const client = initializeClient();
+        
+        // Get some recent emails to test with
+        const testLimit = Math.min(Math.max(limit, 1), 10);
+        const emails = await client.getRecentEmails(testLimit, 'inbox');
+        
+        if (emails.length === 0) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: 'No emails found for bulk operation testing. Try sending yourself a test email first.',
+              },
+            ],
+          };
+        }
+        
+        const emailIds = emails.slice(0, testLimit).map(email => email.id);
+        const operations = [
+          {
+            name: 'bulk_mark_read',
+            description: `Mark ${emailIds.length} emails as read`,
+            parameters: { emailIds, read: true }
+          },
+          {
+            name: 'bulk_mark_read (undo)',
+            description: `Mark ${emailIds.length} emails as unread (undo previous)`,
+            parameters: { emailIds, read: false }
+          }
+        ];
+        
+        const results = {
+          testEmails: emails.map(email => ({
+            id: email.id,
+            subject: email.subject,
+            from: email.from?.[0]?.email || 'unknown',
+            receivedAt: email.receivedAt
+          })),
+          operations: [] as any[]
+        };
+        
+        if (dryRun) {
+          results.operations = operations.map(op => ({
+            ...op,
+            status: 'DRY RUN - Would execute but not actually performed',
+            executed: false
+          }));
+          
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `BULK OPERATIONS TEST (DRY RUN)\n\n${JSON.stringify(results, null, 2)}\n\nTo actually execute the test, set dryRun: false`,
+              },
+            ],
+          };
+        } else {
+          // Execute the test operations
+          for (const operation of operations) {
+            try {
+              await client.bulkMarkRead(operation.parameters.emailIds, operation.parameters.read);
+              results.operations.push({
+                ...operation,
+                status: 'SUCCESS',
+                executed: true,
+                timestamp: new Date().toISOString()
+              });
+              
+              // Small delay between operations
+              await new Promise(resolve => setTimeout(resolve, 500));
+            } catch (error) {
+              results.operations.push({
+                ...operation,
+                status: 'FAILED',
+                executed: false,
+                error: error instanceof Error ? error.message : String(error),
+                timestamp: new Date().toISOString()
+              });
+            }
+          }
+          
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `BULK OPERATIONS TEST (EXECUTED)\n\n${JSON.stringify(results, null, 2)}`,
+              },
+            ],
+          };
+        }
       }
 
       default:

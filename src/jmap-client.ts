@@ -272,7 +272,7 @@ export class JmapClient {
           onSuccessUpdateEmail: {
             '#submission': {
               mailboxIds: sentMailboxIds,
-              keywords: {}
+              keywords: { $seen: true }
             }
           }
         }, 'submitEmail']

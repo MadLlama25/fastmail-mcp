@@ -123,6 +123,28 @@ A comprehensive Model Context Protocol (MCP) server that provides AI assistants 
 - **Purpose**: Shows which functions are available based on account permissions
 - **Output**: Categorizes functions by type (email, contacts, calendar, identity) with availability status
 
+### Phase 6: Final Polish & Testing Tools (v1.5.0)
+**Issue**: Sent emails showing as unread, need better testing capabilities
+
+**Final Improvements**:
+
+#### Sent Email Read Status Fix
+- **Problem**: Sent emails appeared as unread in Sent folder
+- **Solution**: Added `$seen: true` keyword when moving emails to Sent folder
+- **Code**: `keywords: { $seen: true }` in onSuccessUpdateEmail
+- **Benefit**: Sent emails now properly show as read
+
+#### Enhanced Setup Guidance
+- **Improvement**: Added step-by-step enablement guides
+- **Features**: Direct links to Fastmail documentation and specific setup steps
+- **Purpose**: Help users understand exactly how to enable calendar/contacts
+
+#### Bulk Operations Testing Tool
+- **New Tool**: `test_bulk_operations`
+- **Purpose**: Safe testing of bulk operations with dry-run mode
+- **Features**: Tests bulk_mark_read operations, shows what would happen before execution
+- **Safety**: Defaults to dry-run mode to prevent accidental changes
+
 ## Current Architecture
 
 ### Core Components
@@ -190,7 +212,7 @@ export class ContactsCalendarClient extends JmapClient {
 }
 ```
 
-### MCP Tools (31 Total)
+### MCP Tools (32 Total)
 
 #### Core Email Operations (8)
 1. `list_mailboxes` - Get all mailboxes
@@ -229,9 +251,10 @@ export class ContactsCalendarClient extends JmapClient {
 24. `get_calendar_event` - Specific event
 25. `create_calendar_event` - Create events
 
-#### Identity & Account (3)
+#### Identity & Account (4)
 26. `list_identities` - Sending identities
 27. `check_function_availability` - Check available functions based on permissions
+28. `test_bulk_operations` - Test bulk operations safely with dry-run mode
 
 ## Technical Patterns & Best Practices
 
@@ -397,6 +420,7 @@ FASTMAIL_BASE_URL="https://api.fastmail.com"  # Optional
 - **v1.2.0**: Comprehensive feature set with JMAP-Samples integration
 - **v1.3.0**: Critical fixes for threading, attachments, and identity verification
 - **v1.4.0**: Thread ID resolution, permission detection, and function availability checking
+- **v1.5.0**: Sent email read status fix, enhanced setup guidance, and bulk operations testing
 
 ### Migration Notes
 - **Breaking Changes**: None currently
