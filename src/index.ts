@@ -388,6 +388,177 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ['emailId', 'targetMailboxId'],
         },
       },
+      {
+        name: 'get_email_attachments',
+        description: 'Get list of attachments for an email',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            emailId: {
+              type: 'string',
+              description: 'ID of the email',
+            },
+          },
+          required: ['emailId'],
+        },
+      },
+      {
+        name: 'download_attachment',
+        description: 'Download an email attachment',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            emailId: {
+              type: 'string',
+              description: 'ID of the email',
+            },
+            attachmentId: {
+              type: 'string',
+              description: 'ID of the attachment',
+            },
+          },
+          required: ['emailId', 'attachmentId'],
+        },
+      },
+      {
+        name: 'advanced_search',
+        description: 'Advanced email search with multiple criteria',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            query: {
+              type: 'string',
+              description: 'Text to search for in subject/body',
+            },
+            from: {
+              type: 'string',
+              description: 'Filter by sender email',
+            },
+            to: {
+              type: 'string',
+              description: 'Filter by recipient email',
+            },
+            subject: {
+              type: 'string',
+              description: 'Filter by subject',
+            },
+            hasAttachment: {
+              type: 'boolean',
+              description: 'Filter emails with attachments',
+            },
+            isUnread: {
+              type: 'boolean',
+              description: 'Filter unread emails',
+            },
+            mailboxId: {
+              type: 'string',
+              description: 'Search within specific mailbox',
+            },
+            after: {
+              type: 'string',
+              description: 'Emails after this date (ISO 8601)',
+            },
+            before: {
+              type: 'string',
+              description: 'Emails before this date (ISO 8601)',
+            },
+            limit: {
+              type: 'number',
+              description: 'Maximum results (default: 50)',
+              default: 50,
+            },
+          },
+        },
+      },
+      {
+        name: 'get_thread',
+        description: 'Get all emails in a conversation thread',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            threadId: {
+              type: 'string',
+              description: 'ID of the thread/conversation',
+            },
+          },
+          required: ['threadId'],
+        },
+      },
+      {
+        name: 'get_mailbox_stats',
+        description: 'Get statistics for a mailbox (unread count, total emails, etc.)',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            mailboxId: {
+              type: 'string',
+              description: 'ID of the mailbox (optional, defaults to all mailboxes)',
+            },
+          },
+        },
+      },
+      {
+        name: 'get_account_summary',
+        description: 'Get overall account summary with statistics',
+        inputSchema: {
+          type: 'object',
+          properties: {},
+        },
+      },
+      {
+        name: 'bulk_mark_read',
+        description: 'Mark multiple emails as read/unread',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            emailIds: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Array of email IDs to mark',
+            },
+            read: {
+              type: 'boolean',
+              description: 'true to mark as read, false as unread',
+              default: true,
+            },
+          },
+          required: ['emailIds'],
+        },
+      },
+      {
+        name: 'bulk_move',
+        description: 'Move multiple emails to a mailbox',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            emailIds: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Array of email IDs to move',
+            },
+            targetMailboxId: {
+              type: 'string',
+              description: 'ID of target mailbox',
+            },
+          },
+          required: ['emailIds', 'targetMailboxId'],
+        },
+      },
+      {
+        name: 'bulk_delete',
+        description: 'Delete multiple emails (move to trash)',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            emailIds: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Array of email IDs to delete',
+            },
+          },
+          required: ['emailIds'],
+        },
+      },
     ],
   };
 });
@@ -702,6 +873,154 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             {
               type: 'text',
               text: 'Email moved successfully',
+            },
+          ],
+        };
+      }
+
+      case 'get_email_attachments': {
+        const { emailId } = args as any;
+        if (!emailId) {
+          throw new McpError(ErrorCode.InvalidParams, 'emailId is required');
+        }
+        const client = initializeClient();
+        const attachments = await client.getEmailAttachments(emailId);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(attachments, null, 2),
+            },
+          ],
+        };
+      }
+
+      case 'download_attachment': {
+        const { emailId, attachmentId } = args as any;
+        if (!emailId || !attachmentId) {
+          throw new McpError(ErrorCode.InvalidParams, 'emailId and attachmentId are required');
+        }
+        const client = initializeClient();
+        const downloadUrl = await client.downloadAttachment(emailId, attachmentId);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Download URL: ${downloadUrl}`,
+            },
+          ],
+        };
+      }
+
+      case 'advanced_search': {
+        const { query, from, to, subject, hasAttachment, isUnread, mailboxId, after, before, limit } = args as any;
+        const client = initializeClient();
+        const emails = await client.advancedSearch({
+          query, from, to, subject, hasAttachment, isUnread, mailboxId, after, before, limit
+        });
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(emails, null, 2),
+            },
+          ],
+        };
+      }
+
+      case 'get_thread': {
+        const { threadId } = args as any;
+        if (!threadId) {
+          throw new McpError(ErrorCode.InvalidParams, 'threadId is required');
+        }
+        const client = initializeClient();
+        const thread = await client.getThread(threadId);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(thread, null, 2),
+            },
+          ],
+        };
+      }
+
+      case 'get_mailbox_stats': {
+        const { mailboxId } = args as any;
+        const client = initializeClient();
+        const stats = await client.getMailboxStats(mailboxId);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(stats, null, 2),
+            },
+          ],
+        };
+      }
+
+      case 'get_account_summary': {
+        const client = initializeClient();
+        const summary = await client.getAccountSummary();
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(summary, null, 2),
+            },
+          ],
+        };
+      }
+
+      case 'bulk_mark_read': {
+        const { emailIds, read = true } = args as any;
+        if (!emailIds || !Array.isArray(emailIds) || emailIds.length === 0) {
+          throw new McpError(ErrorCode.InvalidParams, 'emailIds array is required and must not be empty');
+        }
+        const client = initializeClient();
+        await client.bulkMarkRead(emailIds, read);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `${emailIds.length} emails ${read ? 'marked as read' : 'marked as unread'} successfully`,
+            },
+          ],
+        };
+      }
+
+      case 'bulk_move': {
+        const { emailIds, targetMailboxId } = args as any;
+        if (!emailIds || !Array.isArray(emailIds) || emailIds.length === 0) {
+          throw new McpError(ErrorCode.InvalidParams, 'emailIds array is required and must not be empty');
+        }
+        if (!targetMailboxId) {
+          throw new McpError(ErrorCode.InvalidParams, 'targetMailboxId is required');
+        }
+        const client = initializeClient();
+        await client.bulkMove(emailIds, targetMailboxId);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `${emailIds.length} emails moved successfully`,
+            },
+          ],
+        };
+      }
+
+      case 'bulk_delete': {
+        const { emailIds } = args as any;
+        if (!emailIds || !Array.isArray(emailIds) || emailIds.length === 0) {
+          throw new McpError(ErrorCode.InvalidParams, 'emailIds array is required and must not be empty');
+        }
+        const client = initializeClient();
+        await client.bulkDelete(emailIds);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `${emailIds.length} emails deleted successfully (moved to trash)`,
             },
           ],
         };

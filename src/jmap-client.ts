@@ -391,4 +391,282 @@ export class JmapClient {
       throw new Error(`Failed to move email: ${JSON.stringify(result.notUpdated[emailId])}`);
     }
   }
+
+  async getEmailAttachments(emailId: string): Promise<any[]> {
+    const session = await this.getSession();
+
+    const request: JmapRequest = {
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
+      methodCalls: [
+        ['Email/get', {
+          accountId: session.accountId,
+          ids: [emailId],
+          properties: ['attachments']
+        }, 'getAttachments']
+      ]
+    };
+
+    const response = await this.makeRequest(request);
+    const email = response.methodResponses[0][1].list[0];
+    return email?.attachments || [];
+  }
+
+  async downloadAttachment(emailId: string, attachmentId: string): Promise<string> {
+    const session = await this.getSession();
+
+    // First get the attachment blob ID
+    const email = await this.getEmailById(emailId);
+    const attachment = email.attachments?.find((att: any) => att.partId === attachmentId);
+    
+    if (!attachment) {
+      throw new Error('Attachment not found');
+    }
+
+    // Get the download URL from session capabilities
+    const downloadUrl = session.capabilities['urn:ietf:params:jmap:core']?.downloadUrl;
+    if (!downloadUrl) {
+      throw new Error('Download capability not available');
+    }
+
+    // Build download URL
+    const url = downloadUrl
+      .replace('{accountId}', session.accountId)
+      .replace('{blobId}', attachment.blobId)
+      .replace('{type}', 'application/octet-stream')
+      .replace('{name}', attachment.name || 'attachment');
+
+    return url;
+  }
+
+  async advancedSearch(filters: {
+    query?: string;
+    from?: string;
+    to?: string;
+    subject?: string;
+    hasAttachment?: boolean;
+    isUnread?: boolean;
+    mailboxId?: string;
+    after?: string;
+    before?: string;
+    limit?: number;
+  }): Promise<any[]> {
+    const session = await this.getSession();
+    
+    // Build JMAP filter object
+    const filter: any = {};
+    
+    if (filters.query) filter.text = filters.query;
+    if (filters.from) filter.from = filters.from;
+    if (filters.to) filter.to = filters.to;
+    if (filters.subject) filter.subject = filters.subject;
+    if (filters.hasAttachment !== undefined) filter.hasAttachment = filters.hasAttachment;
+    if (filters.isUnread !== undefined) filter.hasKeyword = filters.isUnread ? undefined : '$seen';
+    if (filters.mailboxId) filter.inMailbox = filters.mailboxId;
+    if (filters.after) filter.after = filters.after;
+    if (filters.before) filter.before = filters.before;
+
+    // If unread filter is specifically true, we need to check for absence of $seen
+    if (filters.isUnread === true) {
+      filter.notKeyword = '$seen';
+      delete filter.hasKeyword;
+    }
+
+    const request: JmapRequest = {
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
+      methodCalls: [
+        ['Email/query', {
+          accountId: session.accountId,
+          filter,
+          sort: [{ property: 'receivedAt', isAscending: false }],
+          limit: Math.min(filters.limit || 50, 100)
+        }, 'query'],
+        ['Email/get', {
+          accountId: session.accountId,
+          '#ids': { resultOf: 'query', name: 'Email/query', path: '/ids' },
+          properties: ['id', 'subject', 'from', 'to', 'cc', 'receivedAt', 'preview', 'hasAttachment', 'keywords', 'threadId']
+        }, 'emails']
+      ]
+    };
+
+    const response = await this.makeRequest(request);
+    return response.methodResponses[1][1].list;
+  }
+
+  async getThread(threadId: string): Promise<any[]> {
+    const session = await this.getSession();
+
+    const request: JmapRequest = {
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
+      methodCalls: [
+        ['Email/query', {
+          accountId: session.accountId,
+          filter: { inThread: threadId },
+          sort: [{ property: 'receivedAt', isAscending: true }]
+        }, 'query'],
+        ['Email/get', {
+          accountId: session.accountId,
+          '#ids': { resultOf: 'query', name: 'Email/query', path: '/ids' },
+          properties: ['id', 'subject', 'from', 'to', 'cc', 'receivedAt', 'preview', 'hasAttachment', 'keywords', 'threadId']
+        }, 'emails']
+      ]
+    };
+
+    const response = await this.makeRequest(request);
+    return response.methodResponses[1][1].list;
+  }
+
+  async getMailboxStats(mailboxId?: string): Promise<any> {
+    const session = await this.getSession();
+    
+    if (mailboxId) {
+      // Get stats for specific mailbox
+      const request: JmapRequest = {
+        using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
+        methodCalls: [
+          ['Mailbox/get', {
+            accountId: session.accountId,
+            ids: [mailboxId],
+            properties: ['id', 'name', 'role', 'totalEmails', 'unreadEmails', 'totalThreads', 'unreadThreads']
+          }, 'mailbox']
+        ]
+      };
+
+      const response = await this.makeRequest(request);
+      return response.methodResponses[0][1].list[0];
+    } else {
+      // Get stats for all mailboxes
+      const mailboxes = await this.getMailboxes();
+      return mailboxes.map(mb => ({
+        id: mb.id,
+        name: mb.name,
+        role: mb.role,
+        totalEmails: mb.totalEmails || 0,
+        unreadEmails: mb.unreadEmails || 0,
+        totalThreads: mb.totalThreads || 0,
+        unreadThreads: mb.unreadThreads || 0
+      }));
+    }
+  }
+
+  async getAccountSummary(): Promise<any> {
+    const session = await this.getSession();
+    const mailboxes = await this.getMailboxes();
+    const identities = await this.getIdentities();
+
+    // Calculate totals
+    const totals = mailboxes.reduce((acc, mb) => ({
+      totalEmails: acc.totalEmails + (mb.totalEmails || 0),
+      unreadEmails: acc.unreadEmails + (mb.unreadEmails || 0),
+      totalThreads: acc.totalThreads + (mb.totalThreads || 0),
+      unreadThreads: acc.unreadThreads + (mb.unreadThreads || 0)
+    }), { totalEmails: 0, unreadEmails: 0, totalThreads: 0, unreadThreads: 0 });
+
+    return {
+      accountId: session.accountId,
+      mailboxCount: mailboxes.length,
+      identityCount: identities.length,
+      ...totals,
+      mailboxes: mailboxes.map(mb => ({
+        id: mb.id,
+        name: mb.name,
+        role: mb.role,
+        totalEmails: mb.totalEmails || 0,
+        unreadEmails: mb.unreadEmails || 0
+      }))
+    };
+  }
+
+  async bulkMarkRead(emailIds: string[], read: boolean = true): Promise<void> {
+    const session = await this.getSession();
+    
+    const keywords = read ? { $seen: true } : {};
+    const updates: Record<string, any> = {};
+    
+    emailIds.forEach(id => {
+      updates[id] = { keywords };
+    });
+
+    const request: JmapRequest = {
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
+      methodCalls: [
+        ['Email/set', {
+          accountId: session.accountId,
+          update: updates
+        }, 'bulkUpdate']
+      ]
+    };
+
+    const response = await this.makeRequest(request);
+    const result = response.methodResponses[0][1];
+    
+    if (result.notUpdated && Object.keys(result.notUpdated).length > 0) {
+      throw new Error(`Failed to update some emails: ${JSON.stringify(result.notUpdated)}`);
+    }
+  }
+
+  async bulkMove(emailIds: string[], targetMailboxId: string): Promise<void> {
+    const session = await this.getSession();
+
+    const targetMailboxIds: Record<string, boolean> = {};
+    targetMailboxIds[targetMailboxId] = true;
+
+    const updates: Record<string, any> = {};
+    emailIds.forEach(id => {
+      updates[id] = { mailboxIds: targetMailboxIds };
+    });
+
+    const request: JmapRequest = {
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
+      methodCalls: [
+        ['Email/set', {
+          accountId: session.accountId,
+          update: updates
+        }, 'bulkMove']
+      ]
+    };
+
+    const response = await this.makeRequest(request);
+    const result = response.methodResponses[0][1];
+    
+    if (result.notUpdated && Object.keys(result.notUpdated).length > 0) {
+      throw new Error(`Failed to move some emails: ${JSON.stringify(result.notUpdated)}`);
+    }
+  }
+
+  async bulkDelete(emailIds: string[]): Promise<void> {
+    const session = await this.getSession();
+    
+    // Find the trash mailbox
+    const mailboxes = await this.getMailboxes();
+    const trashMailbox = mailboxes.find(mb => mb.role === 'trash') || mailboxes.find(mb => mb.name.toLowerCase().includes('trash'));
+    
+    if (!trashMailbox) {
+      throw new Error('Could not find Trash mailbox');
+    }
+
+    const trashMailboxIds: Record<string, boolean> = {};
+    trashMailboxIds[trashMailbox.id] = true;
+
+    const updates: Record<string, any> = {};
+    emailIds.forEach(id => {
+      updates[id] = { mailboxIds: trashMailboxIds };
+    });
+
+    const request: JmapRequest = {
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
+      methodCalls: [
+        ['Email/set', {
+          accountId: session.accountId,
+          update: updates
+        }, 'bulkDelete']
+      ]
+    };
+
+    const response = await this.makeRequest(request);
+    const result = response.methodResponses[0][1];
+    
+    if (result.notUpdated && Object.keys(result.notUpdated).length > 0) {
+      throw new Error(`Failed to delete some emails: ${JSON.stringify(result.notUpdated)}`);
+    }
+  }
 }

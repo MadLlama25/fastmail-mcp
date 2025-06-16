@@ -4,23 +4,33 @@ A Model Context Protocol (MCP) server that provides access to the Fastmail API, 
 
 ## Features
 
-### Email Operations
-- List mailboxes
-- List emails from specific mailboxes or all mailboxes
-- Get specific emails by ID
-- Send emails (text and HTML)
-- Search emails by content
+### Core Email Operations
+- List mailboxes and get mailbox statistics
+- List, search, and filter emails with advanced criteria
+- Get specific emails by ID with full content
+- Send emails (text and HTML) with proper draft/sent handling
+- Email management: mark read/unread, delete, move between folders
+
+### Advanced Email Features
+- **Attachment Handling**: List and download email attachments
+- **Threading Support**: Get complete conversation threads
+- **Advanced Search**: Multi-criteria filtering (sender, date range, attachments, read status)
+- **Bulk Operations**: Process multiple emails simultaneously
+- **Statistics & Analytics**: Account summaries and mailbox statistics
 
 ### Contacts Operations
-- List all contacts
+- List all contacts with full contact information
 - Get specific contacts by ID
 - Search contacts by name or email
 
 ### Calendar Operations
-- List all calendars
-- List calendar events
+- List all calendars and calendar events
 - Get specific calendar events by ID
-- Create new calendar events
+- Create new calendar events with participants and details
+
+### Identity & Account Management
+- List available sending identities
+- Account summary with comprehensive statistics
 
 ## Setup
 
@@ -110,6 +120,32 @@ Add this server to your MCP client configuration. For example, with Claude Deskt
   - Parameters: `emailId` (required)
 - **move_email**: Move an email to a different mailbox
   - Parameters: `emailId` (required), `targetMailboxId` (required)
+
+### Advanced Email Features
+
+- **get_email_attachments**: Get list of attachments for an email
+  - Parameters: `emailId` (required)
+- **download_attachment**: Get download URL for an email attachment
+  - Parameters: `emailId` (required), `attachmentId` (required)
+- **advanced_search**: Advanced email search with multiple criteria
+  - Parameters: `query` (optional), `from` (optional), `to` (optional), `subject` (optional), `hasAttachment` (optional), `isUnread` (optional), `mailboxId` (optional), `after` (optional), `before` (optional), `limit` (default: 50)
+- **get_thread**: Get all emails in a conversation thread
+  - Parameters: `threadId` (required)
+
+### Email Statistics & Analytics
+
+- **get_mailbox_stats**: Get statistics for a mailbox (unread count, total emails, etc.)
+  - Parameters: `mailboxId` (optional, defaults to all mailboxes)
+- **get_account_summary**: Get overall account summary with statistics
+
+### Bulk Operations
+
+- **bulk_mark_read**: Mark multiple emails as read/unread
+  - Parameters: `emailIds` (required array), `read` (default: true)
+- **bulk_move**: Move multiple emails to a mailbox
+  - Parameters: `emailIds` (required array), `targetMailboxId` (required)
+- **bulk_delete**: Delete multiple emails (move to trash)
+  - Parameters: `emailIds` (required array)
 
 ### Contact Tools
 
