@@ -139,6 +139,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: 'string',
               description: 'Sender email address (optional, defaults to account primary email)',
             },
+            mailboxId: {
+              type: 'string',
+              description: 'Mailbox ID to save the email to (optional, defaults to Drafts folder)',
+            },
             subject: {
               type: 'string',
               description: 'Email subject',
@@ -359,7 +363,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'send_email': {
-        const { to, cc, bcc, from, subject, textBody, htmlBody } = args as any;
+        const { to, cc, bcc, from, mailboxId, subject, textBody, htmlBody } = args as any;
         if (!to || !Array.isArray(to) || to.length === 0) {
           throw new McpError(ErrorCode.InvalidParams, 'to field is required and must be a non-empty array');
         }
@@ -375,6 +379,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           cc,
           bcc,
           from,
+          mailboxId,
           subject,
           textBody,
           htmlBody,

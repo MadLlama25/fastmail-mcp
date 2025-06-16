@@ -158,20 +158,47 @@ export class JmapClient {
     textBody?: string;
     htmlBody?: string;
     from?: string;
+    mailboxId?: string;
   }): Promise<string> {
     const session = await this.getSession();
 
     // Get the primary email address from session if not provided
     const fromEmail = email.from || await this.getUserEmail();
 
+    // Get the mailbox ID to save the email to
+    let mailboxId = email.mailboxId;
+    if (!mailboxId) {
+      // Get mailboxes to find the Drafts folder
+      const mailboxes = await this.getMailboxes();
+      const draftsMailbox = mailboxes.find(mb => mb.role === 'drafts') || mailboxes.find(mb => mb.name.toLowerCase().includes('draft'));
+      
+      if (!draftsMailbox) {
+        throw new Error('Could not find Drafts mailbox to save email');
+      }
+      mailboxId = draftsMailbox.id;
+    }
+
+    // Ensure we have at least one body type
+    if (!email.textBody && !email.htmlBody) {
+      throw new Error('Either textBody or htmlBody must be provided');
+    }
+
+    if (!mailboxId) {
+      throw new Error('Mailbox ID is required');
+    }
+
+    const mailboxIds: Record<string, boolean> = {};
+    mailboxIds[mailboxId] = true;
+
     const emailObject = {
+      mailboxIds,
       from: [{ email: fromEmail }],
       to: email.to.map(addr => ({ email: addr })),
       cc: email.cc?.map(addr => ({ email: addr })) || [],
       bcc: email.bcc?.map(addr => ({ email: addr })) || [],
       subject: email.subject,
-      textBody: email.textBody ? [{ partId: 'text', type: 'text/plain' }] : [],
-      htmlBody: email.htmlBody ? [{ partId: 'html', type: 'text/html' }] : [],
+      textBody: email.textBody ? [{ partId: 'text', type: 'text/plain' }] : undefined,
+      htmlBody: email.htmlBody ? [{ partId: 'html', type: 'text/html' }] : undefined,
       bodyValues: {
         ...(email.textBody && { text: { value: email.textBody } }),
         ...(email.htmlBody && { html: { value: email.htmlBody } })
