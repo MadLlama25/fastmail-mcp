@@ -178,33 +178,35 @@ export class JmapClient {
     // Use the identity email or the provided from email
     const fromEmail = email.from || identity.email;
 
-    // Get the mailbox ID to save the email to
-    let mailboxId = email.mailboxId;
-    if (!mailboxId) {
-      // Get mailboxes to find the Drafts folder
-      const mailboxes = await this.getMailboxes();
-      const draftsMailbox = mailboxes.find(mb => mb.role === 'drafts') || mailboxes.find(mb => mb.name.toLowerCase().includes('draft'));
-      
-      if (!draftsMailbox) {
-        throw new Error('Could not find Drafts mailbox to save email');
-      }
-      mailboxId = draftsMailbox.id;
+    // Get the mailbox IDs we need
+    const mailboxes = await this.getMailboxes();
+    const draftsMailbox = mailboxes.find(mb => mb.role === 'drafts') || mailboxes.find(mb => mb.name.toLowerCase().includes('draft'));
+    const sentMailbox = mailboxes.find(mb => mb.role === 'sent') || mailboxes.find(mb => mb.name.toLowerCase().includes('sent'));
+    
+    if (!draftsMailbox) {
+      throw new Error('Could not find Drafts mailbox to save email');
     }
+    if (!sentMailbox) {
+      throw new Error('Could not find Sent mailbox to move email after sending');
+    }
+
+    // Use provided mailboxId or default to drafts for initial creation
+    const initialMailboxId = email.mailboxId || draftsMailbox.id;
 
     // Ensure we have at least one body type
     if (!email.textBody && !email.htmlBody) {
       throw new Error('Either textBody or htmlBody must be provided');
     }
 
-    if (!mailboxId) {
-      throw new Error('Mailbox ID is required');
-    }
+    const initialMailboxIds: Record<string, boolean> = {};
+    initialMailboxIds[initialMailboxId] = true;
 
-    const mailboxIds: Record<string, boolean> = {};
-    mailboxIds[mailboxId] = true;
+    const sentMailboxIds: Record<string, boolean> = {};
+    sentMailboxIds[sentMailbox.id] = true;
 
     const emailObject = {
-      mailboxIds,
+      mailboxIds: initialMailboxIds,
+      keywords: { $draft: true },
       from: [{ email: fromEmail }],
       to: email.to.map(addr => ({ email: addr })),
       cc: email.cc?.map(addr => ({ email: addr })) || [],
@@ -235,6 +237,12 @@ export class JmapClient {
                 mailFrom: { email: fromEmail },
                 rcptTo: email.to.map(addr => ({ email: addr }))
               }
+            }
+          },
+          onSuccessUpdateEmail: {
+            '#submission': {
+              mailboxIds: sentMailboxIds,
+              keywords: {}
             }
           }
         }, 'submitEmail']
