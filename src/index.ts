@@ -310,6 +310,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ['calendarId', 'title', 'start', 'end'],
         },
       },
+      {
+        name: 'list_identities',
+        description: 'List sending identities (email addresses that can be used for sending)',
+        inputSchema: {
+          type: 'object',
+          properties: {},
+        },
+      },
     ],
   };
 });
@@ -545,6 +553,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             {
               type: 'text',
               text: `Calendar event created successfully. Event ID: ${eventId}`,
+            },
+          ],
+        };
+      }
+
+      case 'list_identities': {
+        const client = initializeClient();
+        const identities = await client.getIdentities();
+        
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(identities, null, 2),
             },
           ],
         };

@@ -99,7 +99,7 @@ Add this server to your MCP client configuration. For example, with Claude Deskt
 - **get_email**: Get a specific email by ID
   - Parameters: `emailId` (required)
 - **send_email**: Send an email
-  - Parameters: `to` (required array), `cc` (optional array), `bcc` (optional array), `subject` (required), `textBody` (optional), `htmlBody` (optional)
+  - Parameters: `to` (required array), `cc` (optional array), `bcc` (optional array), `from` (optional), `mailboxId` (optional), `subject` (required), `textBody` (optional), `htmlBody` (optional)
 - **search_emails**: Search emails by content
   - Parameters: `query` (required), `limit` (default: 20)
 
@@ -121,6 +121,10 @@ Add this server to your MCP client configuration. For example, with Claude Deskt
   - Parameters: `eventId` (required)
 - **create_calendar_event**: Create a new calendar event
   - Parameters: `calendarId` (required), `title` (required), `description` (optional), `start` (required, ISO 8601), `end` (required, ISO 8601), `location` (optional), `participants` (optional array)
+
+### Identity Tools
+
+- **list_identities**: List sending identities (email addresses that can be used for sending)
 
 ## API Information
 

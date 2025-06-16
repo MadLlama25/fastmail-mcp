@@ -51,25 +51,9 @@ export class JmapClient {
   }
 
   async getUserEmail(): Promise<string> {
-    const session = await this.getSession();
-    
-    // Try to get the user's primary email from the Identity object
-    const request: JmapRequest = {
-      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:submission'],
-      methodCalls: [
-        ['Identity/get', {
-          accountId: session.accountId
-        }, 'identities']
-      ]
-    };
-
     try {
-      const response = await this.makeRequest(request);
-      const identities = response.methodResponses[0][1].list;
-      
-      // Find the default identity or use the first one
-      const defaultIdentity = identities.find((id: any) => id.mayDelete === false) || identities[0];
-      return defaultIdentity?.email || 'user@example.com';
+      const identity = await this.getDefaultIdentity();
+      return identity?.email || 'user@example.com';
     } catch (error) {
       // Fallback if Identity/get is not available
       return 'user@example.com';
@@ -150,6 +134,29 @@ export class JmapClient {
     return response.methodResponses[0][1].list[0];
   }
 
+  async getIdentities(): Promise<any[]> {
+    const session = await this.getSession();
+    
+    const request: JmapRequest = {
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:submission'],
+      methodCalls: [
+        ['Identity/get', {
+          accountId: session.accountId
+        }, 'identities']
+      ]
+    };
+
+    const response = await this.makeRequest(request);
+    return response.methodResponses[0][1].list;
+  }
+
+  async getDefaultIdentity(): Promise<any> {
+    const identities = await this.getIdentities();
+    
+    // Find the default identity (usually the one that can't be deleted)
+    return identities.find((id: any) => id.mayDelete === false) || identities[0];
+  }
+
   async sendEmail(email: {
     to: string[];
     cc?: string[];
@@ -162,8 +169,14 @@ export class JmapClient {
   }): Promise<string> {
     const session = await this.getSession();
 
-    // Get the primary email address from session if not provided
-    const fromEmail = email.from || await this.getUserEmail();
+    // Get the default identity for sending
+    const identity = await this.getDefaultIdentity();
+    if (!identity) {
+      throw new Error('No sending identity found');
+    }
+
+    // Use the identity email or the provided from email
+    const fromEmail = email.from || identity.email;
 
     // Get the mailbox ID to save the email to
     let mailboxId = email.mailboxId;
@@ -217,6 +230,7 @@ export class JmapClient {
           create: {
             submission: {
               emailId: '#draft',
+              identityId: identity.id,
               envelope: {
                 mailFrom: { email: fromEmail },
                 rcptTo: email.to.map(addr => ({ email: addr }))
