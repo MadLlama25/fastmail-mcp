@@ -58,7 +58,7 @@ A comprehensive Model Context Protocol (MCP) server that provides AI assistants 
 - Comprehensive error handling with detailed messages
 - Proper JMAP keyword handling (`$seen`, `$draft`)
 
-### Phase 4: Comprehensive Testing & Fixes
+### Phase 4: Comprehensive Testing & Fixes (v1.3.0)
 **Issue**: Claude Desktop testing revealed 7 failing functions out of 30
 
 **Test Results Analysis**:
@@ -98,6 +98,30 @@ A comprehensive Model Context Protocol (MCP) server that provides AI assistants 
 - **Problem**: Poor error messages for invalid IDs
 - **Solution**: Enhanced error detection with `notFound` checking
 - **Code**: `if (result.notFound && result.notFound.includes(id))`
+
+### Phase 5: Enhanced User Experience & Permissions (v1.4.0)
+**Issue**: Additional testing revealed thread ID confusion and permission issues
+
+**New Fixes Implemented**:
+
+#### Advanced Thread ID Resolution
+- **Problem**: `get_thread()` returned empty when using email ID as thread ID
+- **Solution**: Added automatic thread ID resolution from email ID
+- **Code**: Pre-check if threadId is actually an email ID and resolve actual threadId
+- **Benefit**: Users can now use either email IDs or thread IDs interchangeably
+
+#### Permission Detection System
+- **Problem**: Calendar/contact functions returned "Forbidden" with unclear guidance
+- **Solution**: Added capability checking before attempting operations
+- **Features**:
+  - Check JMAP capabilities: `session.capabilities['urn:ietf:params:jmap:contacts']`
+  - Provide clear error messages with guidance for enabling permissions
+  - Added `check_function_availability` tool for users to see what's available
+
+#### Function Availability Tool
+- **New Tool**: `check_function_availability` 
+- **Purpose**: Shows which functions are available based on account permissions
+- **Output**: Categorizes functions by type (email, contacts, calendar, identity) with availability status
 
 ## Current Architecture
 
@@ -166,7 +190,7 @@ export class ContactsCalendarClient extends JmapClient {
 }
 ```
 
-### MCP Tools (30 Total)
+### MCP Tools (31 Total)
 
 #### Core Email Operations (8)
 1. `list_mailboxes` - Get all mailboxes
@@ -205,8 +229,9 @@ export class ContactsCalendarClient extends JmapClient {
 24. `get_calendar_event` - Specific event
 25. `create_calendar_event` - Create events
 
-#### Identity & Account (2)
+#### Identity & Account (3)
 26. `list_identities` - Sending identities
+27. `check_function_availability` - Check available functions based on permissions
 
 ## Technical Patterns & Best Practices
 
@@ -371,6 +396,7 @@ FASTMAIL_BASE_URL="https://api.fastmail.com"  # Optional
 - **v1.1.0**: Added email sending with proper draft/sent handling
 - **v1.2.0**: Comprehensive feature set with JMAP-Samples integration
 - **v1.3.0**: Critical fixes for threading, attachments, and identity verification
+- **v1.4.0**: Thread ID resolution, permission detection, and function availability checking
 
 ### Migration Notes
 - **Breaking Changes**: None currently

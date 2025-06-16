@@ -552,13 +552,39 @@ export class JmapClient {
   async getThread(threadId: string): Promise<any[]> {
     const session = await this.getSession();
 
-    // Use Thread/get instead of filtering emails by thread
+    // First, check if threadId is actually an email ID and resolve the thread
+    let actualThreadId = threadId;
+    
+    // Try to get the email first to see if we need to resolve thread ID
+    try {
+      const emailRequest: JmapRequest = {
+        using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
+        methodCalls: [
+          ['Email/get', {
+            accountId: session.accountId,
+            ids: [threadId],
+            properties: ['threadId']
+          }, 'checkEmail']
+        ]
+      };
+      
+      const emailResponse = await this.makeRequest(emailRequest);
+      const email = emailResponse.methodResponses[0][1].list[0];
+      
+      if (email && email.threadId) {
+        actualThreadId = email.threadId;
+      }
+    } catch (error) {
+      // If email lookup fails, assume threadId is correct
+    }
+
+    // Use Thread/get with the resolved thread ID
     const request: JmapRequest = {
       using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
       methodCalls: [
         ['Thread/get', {
           accountId: session.accountId,
-          ids: [threadId]
+          ids: [actualThreadId]
         }, 'getThread'],
         ['Email/get', {
           accountId: session.accountId,
@@ -569,6 +595,13 @@ export class JmapClient {
     };
 
     const response = await this.makeRequest(request);
+    const threadResult = response.methodResponses[0][1];
+    
+    // Check if thread was found
+    if (threadResult.notFound && threadResult.notFound.includes(actualThreadId)) {
+      throw new Error(`Thread with ID '${actualThreadId}' not found`);
+    }
+    
     return response.methodResponses[1][1].list;
   }
 

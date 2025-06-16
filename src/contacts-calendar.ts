@@ -2,7 +2,23 @@ import { JmapClient, JmapRequest } from './jmap-client.js';
 
 export class ContactsCalendarClient extends JmapClient {
   
+  private async checkContactsPermission(): Promise<boolean> {
+    const session = await this.getSession();
+    return !!session.capabilities['urn:ietf:params:jmap:contacts'];
+  }
+  
+  private async checkCalendarsPermission(): Promise<boolean> {
+    const session = await this.getSession();
+    return !!session.capabilities['urn:ietf:params:jmap:calendars'];
+  }
+  
   async getContacts(limit: number = 50): Promise<any[]> {
+    // Check permissions first
+    const hasPermission = await this.checkContactsPermission();
+    if (!hasPermission) {
+      throw new Error('Contacts access not available. This account may not have JMAP contacts permissions enabled. Please check your Fastmail account settings or contact support to enable contacts API access.');
+    }
+
     const session = await this.getSession();
     
     // Try CardDAV namespace first, then Fastmail specific
@@ -39,12 +55,18 @@ export class ContactsCalendarClient extends JmapClient {
         const fallbackResponse = await this.makeRequest(fallbackRequest);
         return fallbackResponse.methodResponses[0][1].list || [];
       } catch (fallbackError) {
-        throw new Error(`Contacts not supported or accessible: ${error instanceof Error ? error.message : String(error)}`);
+        throw new Error(`Contacts not supported or accessible: ${error instanceof Error ? error.message : String(error)}. Try checking account permissions or enabling contacts API access in Fastmail settings.`);
       }
     }
   }
 
   async getContactById(id: string): Promise<any> {
+    // Check permissions first
+    const hasPermission = await this.checkContactsPermission();
+    if (!hasPermission) {
+      throw new Error('Contacts access not available. This account may not have JMAP contacts permissions enabled. Please check your Fastmail account settings or contact support to enable contacts API access.');
+    }
+
     const session = await this.getSession();
     
     const request: JmapRequest = {
@@ -61,11 +83,17 @@ export class ContactsCalendarClient extends JmapClient {
       const response = await this.makeRequest(request);
       return response.methodResponses[0][1].list[0];
     } catch (error) {
-      throw new Error(`Contact access not supported: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(`Contact access not supported: ${error instanceof Error ? error.message : String(error)}. Try checking account permissions or enabling contacts API access in Fastmail settings.`);
     }
   }
 
   async searchContacts(query: string, limit: number = 20): Promise<any[]> {
+    // Check permissions first
+    const hasPermission = await this.checkContactsPermission();
+    if (!hasPermission) {
+      throw new Error('Contacts access not available. This account may not have JMAP contacts permissions enabled. Please check your Fastmail account settings or contact support to enable contacts API access.');
+    }
+
     const session = await this.getSession();
     
     const request: JmapRequest = {
@@ -88,11 +116,17 @@ export class ContactsCalendarClient extends JmapClient {
       const response = await this.makeRequest(request);
       return response.methodResponses[1][1].list;
     } catch (error) {
-      throw new Error(`Contact search not supported: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(`Contact search not supported: ${error instanceof Error ? error.message : String(error)}. Try checking account permissions or enabling contacts API access in Fastmail settings.`);
     }
   }
 
   async getCalendars(): Promise<any[]> {
+    // Check permissions first
+    const hasPermission = await this.checkCalendarsPermission();
+    if (!hasPermission) {
+      throw new Error('Calendar access not available. This account may not have JMAP calendar permissions enabled. Please check your Fastmail account settings or contact support to enable calendar API access.');
+    }
+
     const session = await this.getSession();
     
     const request: JmapRequest = {
@@ -109,11 +143,17 @@ export class ContactsCalendarClient extends JmapClient {
       return response.methodResponses[0][1].list;
     } catch (error) {
       // Calendar access might require special permissions
-      throw new Error(`Calendar access not supported or requires additional permissions. This may be due to account settings or JMAP scope limitations: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(`Calendar access not supported or requires additional permissions. This may be due to account settings or JMAP scope limitations: ${error instanceof Error ? error.message : String(error)}. Try checking account permissions or enabling calendar API access in Fastmail settings.`);
     }
   }
 
   async getCalendarEvents(calendarId?: string, limit: number = 50): Promise<any[]> {
+    // Check permissions first
+    const hasPermission = await this.checkCalendarsPermission();
+    if (!hasPermission) {
+      throw new Error('Calendar access not available. This account may not have JMAP calendar permissions enabled. Please check your Fastmail account settings or contact support to enable calendar API access.');
+    }
+
     const session = await this.getSession();
     
     const filter = calendarId ? { inCalendar: calendarId } : {};
@@ -139,11 +179,17 @@ export class ContactsCalendarClient extends JmapClient {
       const response = await this.makeRequest(request);
       return response.methodResponses[1][1].list;
     } catch (error) {
-      throw new Error(`Calendar events access not supported: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(`Calendar events access not supported: ${error instanceof Error ? error.message : String(error)}. Try checking account permissions or enabling calendar API access in Fastmail settings.`);
     }
   }
 
   async getCalendarEventById(id: string): Promise<any> {
+    // Check permissions first
+    const hasPermission = await this.checkCalendarsPermission();
+    if (!hasPermission) {
+      throw new Error('Calendar access not available. This account may not have JMAP calendar permissions enabled. Please check your Fastmail account settings or contact support to enable calendar API access.');
+    }
+
     const session = await this.getSession();
     
     const request: JmapRequest = {
@@ -160,7 +206,7 @@ export class ContactsCalendarClient extends JmapClient {
       const response = await this.makeRequest(request);
       return response.methodResponses[0][1].list[0];
     } catch (error) {
-      throw new Error(`Calendar event access not supported: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(`Calendar event access not supported: ${error instanceof Error ? error.message : String(error)}. Try checking account permissions or enabling calendar API access in Fastmail settings.`);
     }
   }
 
@@ -173,6 +219,12 @@ export class ContactsCalendarClient extends JmapClient {
     location?: string;
     participants?: Array<{ email: string; name?: string }>;
   }): Promise<string> {
+    // Check permissions first
+    const hasPermission = await this.checkCalendarsPermission();
+    if (!hasPermission) {
+      throw new Error('Calendar access not available. This account may not have JMAP calendar permissions enabled. Please check your Fastmail account settings or contact support to enable calendar API access.');
+    }
+
     const session = await this.getSession();
 
     const eventObject = {
@@ -199,7 +251,7 @@ export class ContactsCalendarClient extends JmapClient {
       const response = await this.makeRequest(request);
       return response.methodResponses[0][1].created.newEvent.id;
     } catch (error) {
-      throw new Error(`Calendar event creation not supported: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(`Calendar event creation not supported: ${error instanceof Error ? error.message : String(error)}. Try checking account permissions or enabling calendar API access in Fastmail settings.`);
     }
   }
 }

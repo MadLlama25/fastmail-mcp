@@ -559,6 +559,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ['emailIds'],
         },
       },
+      {
+        name: 'check_function_availability',
+        description: 'Check which MCP functions are available based on account permissions',
+        inputSchema: {
+          type: 'object',
+          properties: {},
+        },
+      },
     ],
   };
 });
@@ -1036,6 +1044,51 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             {
               type: 'text',
               text: `${emailIds.length} emails deleted successfully (moved to trash)`,
+            },
+          ],
+        };
+      }
+
+      case 'check_function_availability': {
+        const client = initializeClient();
+        const session = await client.getSession();
+        
+        const availability = {
+          email: {
+            available: true,
+            functions: [
+              'list_mailboxes', 'list_emails', 'get_email', 'send_email', 'search_emails',
+              'get_recent_emails', 'mark_email_read', 'delete_email', 'move_email',
+              'get_email_attachments', 'download_attachment', 'advanced_search', 'get_thread',
+              'get_mailbox_stats', 'get_account_summary', 'bulk_mark_read', 'bulk_move', 'bulk_delete'
+            ]
+          },
+          identity: {
+            available: true,
+            functions: ['list_identities']
+          },
+          contacts: {
+            available: !!session.capabilities['urn:ietf:params:jmap:contacts'],
+            functions: ['list_contacts', 'get_contact', 'search_contacts'],
+            note: session.capabilities['urn:ietf:params:jmap:contacts'] ? 
+              'Contacts are available' : 
+              'Contacts access not available - may require enabling in Fastmail account settings'
+          },
+          calendar: {
+            available: !!session.capabilities['urn:ietf:params:jmap:calendars'],
+            functions: ['list_calendars', 'list_calendar_events', 'get_calendar_event', 'create_calendar_event'],
+            note: session.capabilities['urn:ietf:params:jmap:calendars'] ? 
+              'Calendar is available' : 
+              'Calendar access not available - may require enabling in Fastmail account settings'
+          },
+          capabilities: Object.keys(session.capabilities)
+        };
+        
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(availability, null, 2),
             },
           ],
         };
