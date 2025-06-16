@@ -102,6 +102,14 @@ Add this server to your MCP client configuration. For example, with Claude Deskt
   - Parameters: `to` (required array), `cc` (optional array), `bcc` (optional array), `from` (optional), `mailboxId` (optional), `subject` (required), `textBody` (optional), `htmlBody` (optional)
 - **search_emails**: Search emails by content
   - Parameters: `query` (required), `limit` (default: 20)
+- **get_recent_emails**: Get the most recent emails from a mailbox (inspired by JMAP-Samples top-ten)
+  - Parameters: `limit` (default: 10, max: 50), `mailboxName` (default: 'inbox')
+- **mark_email_read**: Mark an email as read or unread
+  - Parameters: `emailId` (required), `read` (default: true)
+- **delete_email**: Delete an email (move to trash)
+  - Parameters: `emailId` (required)
+- **move_email**: Move an email to a different mailbox
+  - Parameters: `emailId` (required), `targetMailboxId` (required)
 
 ### Contact Tools
 
@@ -129,6 +137,13 @@ Add this server to your MCP client configuration. For example, with Claude Deskt
 ## API Information
 
 This server uses the JMAP (JSON Meta Application Protocol) API provided by Fastmail. JMAP is a modern, efficient alternative to IMAP for email access.
+
+### Inspired by Fastmail JMAP-Samples
+
+Many features in this MCP server are inspired by the official [Fastmail JMAP-Samples](https://github.com/fastmail/JMAP-Samples) repository, including:
+- Recent emails retrieval (based on top-ten example)
+- Email management operations
+- Efficient chained JMAP method calls
 
 ### Authentication
 The server uses bearer token authentication with Fastmail's API. API tokens provide secure access without exposing your main account password.

@@ -318,6 +318,76 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           properties: {},
         },
       },
+      {
+        name: 'get_recent_emails',
+        description: 'Get the most recent emails from inbox (like top-ten)',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            limit: {
+              type: 'number',
+              description: 'Number of recent emails to retrieve (default: 10, max: 50)',
+              default: 10,
+            },
+            mailboxName: {
+              type: 'string',
+              description: 'Mailbox to search (default: inbox)',
+              default: 'inbox',
+            },
+          },
+        },
+      },
+      {
+        name: 'mark_email_read',
+        description: 'Mark an email as read or unread',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            emailId: {
+              type: 'string',
+              description: 'ID of the email to mark',
+            },
+            read: {
+              type: 'boolean',
+              description: 'true to mark as read, false to mark as unread',
+              default: true,
+            },
+          },
+          required: ['emailId'],
+        },
+      },
+      {
+        name: 'delete_email',
+        description: 'Delete an email (move to trash)',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            emailId: {
+              type: 'string',
+              description: 'ID of the email to delete',
+            },
+          },
+          required: ['emailId'],
+        },
+      },
+      {
+        name: 'move_email',
+        description: 'Move an email to a different mailbox',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            emailId: {
+              type: 'string',
+              description: 'ID of the email to move',
+            },
+            targetMailboxId: {
+              type: 'string',
+              description: 'ID of the target mailbox',
+            },
+          },
+          required: ['emailId', 'targetMailboxId'],
+        },
+      },
     ],
   };
 });
@@ -567,6 +637,71 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             {
               type: 'text',
               text: JSON.stringify(identities, null, 2),
+            },
+          ],
+        };
+      }
+
+      case 'get_recent_emails': {
+        const { limit = 10, mailboxName = 'inbox' } = args as any;
+        const client = initializeClient();
+        const emails = await client.getRecentEmails(limit, mailboxName);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(emails, null, 2),
+            },
+          ],
+        };
+      }
+
+      case 'mark_email_read': {
+        const { emailId, read = true } = args as any;
+        if (!emailId) {
+          throw new McpError(ErrorCode.InvalidParams, 'emailId is required');
+        }
+        const client = initializeClient();
+        await client.markEmailRead(emailId, read);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Email ${read ? 'marked as read' : 'marked as unread'} successfully`,
+            },
+          ],
+        };
+      }
+
+      case 'delete_email': {
+        const { emailId } = args as any;
+        if (!emailId) {
+          throw new McpError(ErrorCode.InvalidParams, 'emailId is required');
+        }
+        const client = initializeClient();
+        await client.deleteEmail(emailId);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: 'Email deleted successfully (moved to trash)',
+            },
+          ],
+        };
+      }
+
+      case 'move_email': {
+        const { emailId, targetMailboxId } = args as any;
+        if (!emailId || !targetMailboxId) {
+          throw new McpError(ErrorCode.InvalidParams, 'emailId and targetMailboxId are required');
+        }
+        const client = initializeClient();
+        await client.moveEmail(emailId, targetMailboxId);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: 'Email moved successfully',
             },
           ],
         };

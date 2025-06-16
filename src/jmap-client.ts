@@ -265,4 +265,130 @@ export class JmapClient {
     
     return submissionResult.created?.submission?.id || 'unknown';
   }
+
+  async getRecentEmails(limit: number = 10, mailboxName: string = 'inbox'): Promise<any[]> {
+    const session = await this.getSession();
+    
+    // Find the specified mailbox (default to inbox)
+    const mailboxes = await this.getMailboxes();
+    const targetMailbox = mailboxes.find(mb => 
+      mb.role === mailboxName.toLowerCase() || 
+      mb.name.toLowerCase().includes(mailboxName.toLowerCase())
+    );
+    
+    if (!targetMailbox) {
+      throw new Error(`Could not find mailbox: ${mailboxName}`);
+    }
+
+    const request: JmapRequest = {
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
+      methodCalls: [
+        ['Email/query', {
+          accountId: session.accountId,
+          filter: { inMailbox: targetMailbox.id },
+          sort: [{ property: 'receivedAt', isAscending: false }],
+          limit: Math.min(limit, 50)
+        }, 'query'],
+        ['Email/get', {
+          accountId: session.accountId,
+          '#ids': { resultOf: 'query', name: 'Email/query', path: '/ids' },
+          properties: ['id', 'subject', 'from', 'to', 'receivedAt', 'preview', 'hasAttachment', 'keywords']
+        }, 'emails']
+      ]
+    };
+
+    const response = await this.makeRequest(request);
+    return response.methodResponses[1][1].list;
+  }
+
+  async markEmailRead(emailId: string, read: boolean = true): Promise<void> {
+    const session = await this.getSession();
+    
+    const keywords = read ? { $seen: true } : {};
+    
+    const request: JmapRequest = {
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
+      methodCalls: [
+        ['Email/set', {
+          accountId: session.accountId,
+          update: {
+            [emailId]: {
+              keywords
+            }
+          }
+        }, 'updateEmail']
+      ]
+    };
+
+    const response = await this.makeRequest(request);
+    const result = response.methodResponses[0][1];
+    
+    if (result.notUpdated && result.notUpdated[emailId]) {
+      throw new Error(`Failed to mark email as ${read ? 'read' : 'unread'}: ${JSON.stringify(result.notUpdated[emailId])}`);
+    }
+  }
+
+  async deleteEmail(emailId: string): Promise<void> {
+    const session = await this.getSession();
+    
+    // Find the trash mailbox
+    const mailboxes = await this.getMailboxes();
+    const trashMailbox = mailboxes.find(mb => mb.role === 'trash') || mailboxes.find(mb => mb.name.toLowerCase().includes('trash'));
+    
+    if (!trashMailbox) {
+      throw new Error('Could not find Trash mailbox');
+    }
+
+    const trashMailboxIds: Record<string, boolean> = {};
+    trashMailboxIds[trashMailbox.id] = true;
+
+    const request: JmapRequest = {
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
+      methodCalls: [
+        ['Email/set', {
+          accountId: session.accountId,
+          update: {
+            [emailId]: {
+              mailboxIds: trashMailboxIds
+            }
+          }
+        }, 'moveToTrash']
+      ]
+    };
+
+    const response = await this.makeRequest(request);
+    const result = response.methodResponses[0][1];
+    
+    if (result.notUpdated && result.notUpdated[emailId]) {
+      throw new Error(`Failed to delete email: ${JSON.stringify(result.notUpdated[emailId])}`);
+    }
+  }
+
+  async moveEmail(emailId: string, targetMailboxId: string): Promise<void> {
+    const session = await this.getSession();
+
+    const targetMailboxIds: Record<string, boolean> = {};
+    targetMailboxIds[targetMailboxId] = true;
+
+    const request: JmapRequest = {
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
+      methodCalls: [
+        ['Email/set', {
+          accountId: session.accountId,
+          update: {
+            [emailId]: {
+              mailboxIds: targetMailboxIds
+            }
+          }
+        }, 'moveEmail']
+      ]
+    };
+
+    const response = await this.makeRequest(request);
+    const result = response.methodResponses[0][1];
+    
+    if (result.notUpdated && result.notUpdated[emailId]) {
+      throw new Error(`Failed to move email: ${JSON.stringify(result.notUpdated[emailId])}`);
+    }
+  }
 }
