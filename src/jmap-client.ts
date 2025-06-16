@@ -5,6 +5,8 @@ export interface JmapSession {
   apiUrl: string;
   accountId: string;
   capabilities: Record<string, any>;
+  downloadUrl?: string;
+  uploadUrl?: string;
 }
 
 export interface JmapRequest {
@@ -44,7 +46,9 @@ export class JmapClient {
     this.session = {
       apiUrl: sessionData.apiUrl,
       accountId: Object.keys(sessionData.accounts)[0],
-      capabilities: sessionData.capabilities
+      capabilities: sessionData.capabilities,
+      downloadUrl: sessionData.downloadUrl,
+      uploadUrl: sessionData.uploadUrl
     };
 
     return this.session;
@@ -131,7 +135,18 @@ export class JmapClient {
     };
 
     const response = await this.makeRequest(request);
-    return response.methodResponses[0][1].list[0];
+    const result = response.methodResponses[0][1];
+    
+    if (result.notFound && result.notFound.includes(id)) {
+      throw new Error(`Email with ID '${id}' not found`);
+    }
+    
+    const email = result.list[0];
+    if (!email) {
+      throw new Error(`Email with ID '${id}' not found or not accessible`);
+    }
+    
+    return email;
   }
 
   async getIdentities(): Promise<any[]> {
@@ -169,14 +184,29 @@ export class JmapClient {
   }): Promise<string> {
     const session = await this.getSession();
 
-    // Get the default identity for sending
-    const identity = await this.getDefaultIdentity();
-    if (!identity) {
-      throw new Error('No sending identity found');
+    // Get all identities to validate from address
+    const identities = await this.getIdentities();
+    if (!identities || identities.length === 0) {
+      throw new Error('No sending identities found');
     }
 
-    // Use the identity email or the provided from email
-    const fromEmail = email.from || identity.email;
+    // Determine which identity to use
+    let selectedIdentity;
+    if (email.from) {
+      // Validate that the from address matches an available identity
+      selectedIdentity = identities.find(id => 
+        id.email.toLowerCase() === email.from?.toLowerCase()
+      );
+      if (!selectedIdentity) {
+        const availableEmails = identities.map(id => id.email).join(', ');
+        throw new Error(`From address '${email.from}' is not verified for sending. Available identities: ${availableEmails}`);
+      }
+    } else {
+      // Use default identity
+      selectedIdentity = identities.find(id => id.mayDelete === false) || identities[0];
+    }
+
+    const fromEmail = selectedIdentity.email;
 
     // Get the mailbox IDs we need
     const mailboxes = await this.getMailboxes();
@@ -232,7 +262,7 @@ export class JmapClient {
           create: {
             submission: {
               emailId: '#draft',
-              identityId: identity.id,
+              identityId: selectedIdentity.id,
               envelope: {
                 mailFrom: { email: fromEmail },
                 rcptTo: email.to.map(addr => ({ email: addr }))
@@ -414,26 +444,53 @@ export class JmapClient {
   async downloadAttachment(emailId: string, attachmentId: string): Promise<string> {
     const session = await this.getSession();
 
-    // First get the attachment blob ID
-    const email = await this.getEmailById(emailId);
-    const attachment = email.attachments?.find((att: any) => att.partId === attachmentId);
+    // Get the email with full attachment details
+    const request: JmapRequest = {
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
+      methodCalls: [
+        ['Email/get', {
+          accountId: session.accountId,
+          ids: [emailId],
+          properties: ['attachments', 'bodyValues'],
+          bodyProperties: ['partId', 'blobId', 'size', 'name', 'type']
+        }, 'getEmail']
+      ]
+    };
+
+    const response = await this.makeRequest(request);
+    const email = response.methodResponses[0][1].list[0];
     
-    if (!attachment) {
-      throw new Error('Attachment not found');
+    if (!email) {
+      throw new Error('Email not found');
     }
 
-    // Get the download URL from session capabilities
-    const downloadUrl = session.capabilities['urn:ietf:params:jmap:core']?.downloadUrl;
+    // Find attachment by partId or by index
+    let attachment = email.attachments?.find((att: any) => 
+      att.partId === attachmentId || att.blobId === attachmentId
+    );
+
+    // If not found, try by array index
+    if (!attachment && !isNaN(parseInt(attachmentId))) {
+      const index = parseInt(attachmentId);
+      attachment = email.attachments?.[index];
+    }
+    
+    if (!attachment) {
+      throw new Error(`Attachment not found. Available attachments: ${JSON.stringify(email.attachments?.map((a: any) => ({ partId: a.partId, name: a.name, blobId: a.blobId })) || [])}`);
+    }
+
+    // Get the download URL from session
+    const downloadUrl = session.downloadUrl;
     if (!downloadUrl) {
-      throw new Error('Download capability not available');
+      throw new Error('Download capability not available in session');
     }
 
     // Build download URL
     const url = downloadUrl
       .replace('{accountId}', session.accountId)
       .replace('{blobId}', attachment.blobId)
-      .replace('{type}', 'application/octet-stream')
-      .replace('{name}', attachment.name || 'attachment');
+      .replace('{type}', encodeURIComponent(attachment.type || 'application/octet-stream'))
+      .replace('{name}', encodeURIComponent(attachment.name || 'attachment'));
 
     return url;
   }
@@ -495,17 +552,17 @@ export class JmapClient {
   async getThread(threadId: string): Promise<any[]> {
     const session = await this.getSession();
 
+    // Use Thread/get instead of filtering emails by thread
     const request: JmapRequest = {
       using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
       methodCalls: [
-        ['Email/query', {
+        ['Thread/get', {
           accountId: session.accountId,
-          filter: { inThread: threadId },
-          sort: [{ property: 'receivedAt', isAscending: true }]
-        }, 'query'],
+          ids: [threadId]
+        }, 'getThread'],
         ['Email/get', {
           accountId: session.accountId,
-          '#ids': { resultOf: 'query', name: 'Email/query', path: '/ids' },
+          '#ids': { resultOf: 'getThread', name: 'Thread/get', path: '/list/*/emailIds' },
           properties: ['id', 'subject', 'from', 'to', 'cc', 'receivedAt', 'preview', 'hasAttachment', 'keywords', 'threadId']
         }, 'emails']
       ]

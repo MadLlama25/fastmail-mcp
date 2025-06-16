@@ -901,15 +901,25 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           throw new McpError(ErrorCode.InvalidParams, 'emailId and attachmentId are required');
         }
         const client = initializeClient();
-        const downloadUrl = await client.downloadAttachment(emailId, attachmentId);
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `Download URL: ${downloadUrl}`,
-            },
-          ],
-        };
+        try {
+          const downloadUrl = await client.downloadAttachment(emailId, attachmentId);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Download URL: ${downloadUrl}`,
+              },
+            ],
+          };
+        } catch (error) {
+          // First, let's get the attachments to help debug
+          try {
+            const attachments = await client.getEmailAttachments(emailId);
+            throw new McpError(ErrorCode.InternalError, `Attachment download failed: ${error instanceof Error ? error.message : String(error)}. Available attachments: ${JSON.stringify(attachments.map((a: any) => ({ partId: a.partId, name: a.name, blobId: a.blobId })))}`);
+          } catch (attachError) {
+            throw new McpError(ErrorCode.InternalError, `Attachment download failed and couldn't list attachments: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }
       }
 
       case 'advanced_search': {
@@ -934,15 +944,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           throw new McpError(ErrorCode.InvalidParams, 'threadId is required');
         }
         const client = initializeClient();
-        const thread = await client.getThread(threadId);
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify(thread, null, 2),
-            },
-          ],
-        };
+        try {
+          const thread = await client.getThread(threadId);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(thread, null, 2),
+              },
+            ],
+          };
+        } catch (error) {
+          // Provide helpful error information
+          throw new McpError(ErrorCode.InternalError, `Thread access failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
       }
 
       case 'get_mailbox_stats': {
