@@ -99,7 +99,14 @@ Add this server to your MCP client configuration. For example, with Claude Deskt
 }
 ```
 
-## Available Tools
+## Available Tools (32 Total)
+
+**🎯 Most Popular Tools:**
+- **check_function_availability**: Check what's available and get setup guidance  
+- **test_bulk_operations**: Safely test bulk operations with dry-run mode
+- **send_email**: Full-featured email sending with proper draft/sent handling
+- **advanced_search**: Powerful multi-criteria email filtering
+- **get_recent_emails**: Quick access to recent emails from any mailbox
 
 ### Email Tools
 
@@ -166,9 +173,12 @@ Add this server to your MCP client configuration. For example, with Claude Deskt
 - **create_calendar_event**: Create a new calendar event
   - Parameters: `calendarId` (required), `title` (required), `description` (optional), `start` (required, ISO 8601), `end` (required, ISO 8601), `location` (optional), `participants` (optional array)
 
-### Identity Tools
+### Identity & Testing Tools
 
 - **list_identities**: List sending identities (email addresses that can be used for sending)
+- **check_function_availability**: Check which functions are available based on account permissions (includes setup guidance)
+- **test_bulk_operations**: Safely test bulk operations with dry-run mode
+  - Parameters: `dryRun` (default: true), `limit` (default: 3)
 
 ## API Information
 
@@ -225,7 +235,24 @@ Contributions are welcome! Please ensure that:
 ### Common Issues
 
 1. **Authentication Errors**: Ensure your API token is valid and has the necessary permissions
-2. **Missing Dependencies**: Run `npm install` to ensure all dependencies are installed
+2. **Missing Dependencies**: Run `npm install` to ensure all dependencies are installed  
 3. **Build Errors**: Check that TypeScript compilation completes without errors using `npm run build`
+4. **Calendar/Contacts "Forbidden" Errors**: Use `check_function_availability` to see setup guidance
+
+### Calendar/Contacts Not Working?
+
+If calendar and contacts functions return "Forbidden" errors, this is likely due to:
+
+1. **Account Plan**: Calendar/contacts API may require business/professional Fastmail plans
+2. **API Token Scope**: Your API token may need calendar/contacts permissions enabled
+3. **Feature Enablement**: These features may need explicit activation in your account
+
+**Solution**: Run `check_function_availability` for step-by-step setup guidance.
+
+### Testing Your Setup
+
+Use the built-in testing tools:
+- **check_function_availability**: See what's available and get setup help
+- **test_bulk_operations**: Safely test bulk operations without making changes
 
 For more detailed error information, check the console output when running the server.
