@@ -13,7 +13,7 @@ import { ContactsCalendarClient } from './contacts-calendar.js';
 const server = new Server(
   {
     name: 'fastmail-mcp',
-    version: '1.0.0',
+    version: '1.6.1',
   },
   {
     capabilities: {
@@ -25,12 +25,49 @@ const server = new Server(
 let jmapClient: JmapClient | null = null;
 let contactsCalendarClient: ContactsCalendarClient | null = null;
 
+function resolveEnvValue(...keys: string[]): string | undefined {
+  const isPlaceholder = (val: string) => /\$\{[^}]+\}/.test(val.trim());
+  for (const key of keys) {
+    const raw = process.env[key];
+    if (typeof raw === 'string' && raw.trim().length > 0 && !isPlaceholder(raw)) {
+      return raw.trim();
+    }
+  }
+  return undefined;
+}
+
+function findEnvValue(keys: string[]): { value?: string; key?: string; wasPlaceholder: boolean } {
+  const isPlaceholder = (val: string) => /\$\{[^}]+\}/.test(val.trim());
+  for (const key of keys) {
+    const raw = process.env[key];
+    if (typeof raw === 'string' && raw.trim().length > 0) {
+      if (isPlaceholder(raw)) {
+        return { value: undefined, key, wasPlaceholder: true };
+      }
+      return { value: raw.trim(), key, wasPlaceholder: false };
+    }
+  }
+  return { value: undefined, key: undefined, wasPlaceholder: false };
+}
+
+function maskSecret(value: string): string {
+  if (value.length <= 6) return '***';
+  return `${value.slice(0, 4)}…${value.slice(-2)} (len ${value.length})`;
+}
+
 function initializeClient(): JmapClient {
   if (jmapClient) {
     return jmapClient;
   }
 
-  const apiToken = process.env.FASTMAIL_API_TOKEN;
+  const tokenInfo = findEnvValue([
+    'FASTMAIL_API_TOKEN',
+    'USER_CONFIG_FASTMAIL_API_TOKEN',
+    'USER_CONFIG_fastmail_api_token',
+    'fastmail_api_token',
+  ]);
+  // production: do not log token-related env details
+  const apiToken = tokenInfo.value;
   if (!apiToken) {
     throw new McpError(
       ErrorCode.InvalidRequest,
@@ -38,9 +75,17 @@ function initializeClient(): JmapClient {
     );
   }
 
+  const baseInfo = findEnvValue([
+    'FASTMAIL_BASE_URL',
+    'USER_CONFIG_FASTMAIL_BASE_URL',
+    'USER_CONFIG_fastmail_base_url',
+    'fastmail_base_url',
+  ]);
+  // production: do not log base URL env details
+
   const config: FastmailConfig = {
     apiToken,
-    baseUrl: process.env.FASTMAIL_BASE_URL
+    baseUrl: baseInfo.value
   };
 
   const auth = new FastmailAuth(config);
@@ -53,7 +98,14 @@ function initializeContactsCalendarClient(): ContactsCalendarClient {
     return contactsCalendarClient;
   }
 
-  const apiToken = process.env.FASTMAIL_API_TOKEN;
+  const tokenInfo = findEnvValue([
+    'FASTMAIL_API_TOKEN',
+    'USER_CONFIG_FASTMAIL_API_TOKEN',
+    'USER_CONFIG_fastmail_api_token',
+    'fastmail_api_token',
+  ]);
+  // production: do not log token-related env details (contacts/calendar)
+  const apiToken = tokenInfo.value;
   if (!apiToken) {
     throw new McpError(
       ErrorCode.InvalidRequest,
@@ -61,9 +113,17 @@ function initializeContactsCalendarClient(): ContactsCalendarClient {
     );
   }
 
+  const baseInfo = findEnvValue([
+    'FASTMAIL_BASE_URL',
+    'USER_CONFIG_FASTMAIL_BASE_URL',
+    'USER_CONFIG_fastmail_base_url',
+    'fastmail_base_url',
+  ]);
+  // production: do not log base URL env details (contacts/calendar)
+
   const config: FastmailConfig = {
     apiToken,
-    baseUrl: process.env.FASTMAIL_BASE_URL
+    baseUrl: baseInfo.value
   };
 
   const auth = new FastmailAuth(config);
@@ -594,6 +654,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
   try {
+
     const client = initializeClient();
 
     switch (name) {
@@ -939,13 +1000,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             ],
           };
         } catch (error) {
-          // First, let's get the attachments to help debug
-          try {
-            const attachments = await client.getEmailAttachments(emailId);
-            throw new McpError(ErrorCode.InternalError, `Attachment download failed: ${error instanceof Error ? error.message : String(error)}. Available attachments: ${JSON.stringify(attachments.map((a: any) => ({ partId: a.partId, name: a.name, blobId: a.blobId })))}`);
-          } catch (attachError) {
-            throw new McpError(ErrorCode.InternalError, `Attachment download failed and couldn't list attachments: ${error instanceof Error ? error.message : String(error)}`);
-          }
+          // Sanitize error to avoid leaking attachment metadata
+          throw new McpError(
+            ErrorCode.InternalError,
+            'Attachment download failed. Verify emailId and attachmentId and try again.'
+          );
         }
       }
 
@@ -1245,7 +1304,8 @@ async function runServer() {
   console.error('Fastmail MCP server running on stdio');
 }
 
-runServer().catch((error) => {
-  console.error('Fatal error running server:', error);
+runServer().catch(() => {
+  // Avoid logging raw error objects to prevent accidental PII leakage
+  console.error('Fastmail MCP server failed to start');
   process.exit(1);
 });

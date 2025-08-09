@@ -201,8 +201,7 @@ export class JmapClient {
         id.email.toLowerCase() === email.from?.toLowerCase()
       );
       if (!selectedIdentity) {
-        const availableEmails = identities.map(id => id.email).join(', ');
-        throw new Error(`From address '${email.from}' is not verified for sending. Available identities: ${availableEmails}`);
+        throw new Error('From address is not verified for sending. Choose one of your verified identities.');
       }
     } else {
       // Use default identity
@@ -287,13 +286,13 @@ export class JmapClient {
     // Check if email creation was successful
     const emailResult = response.methodResponses[0][1];
     if (emailResult.notCreated && emailResult.notCreated.draft) {
-      throw new Error(`Failed to create email: ${JSON.stringify(emailResult.notCreated.draft)}`);
+      throw new Error('Failed to create email. Please check inputs and try again.');
     }
     
     // Check if email submission was successful
     const submissionResult = response.methodResponses[1][1];
     if (submissionResult.notCreated && submissionResult.notCreated.submission) {
-      throw new Error(`Failed to submit email: ${JSON.stringify(submissionResult.notCreated.submission)}`);
+      throw new Error('Failed to submit email. Please try again later.');
     }
     
     return submissionResult.created?.submission?.id || 'unknown';
@@ -357,7 +356,7 @@ export class JmapClient {
     const result = response.methodResponses[0][1];
     
     if (result.notUpdated && result.notUpdated[emailId]) {
-      throw new Error(`Failed to mark email as ${read ? 'read' : 'unread'}: ${JSON.stringify(result.notUpdated[emailId])}`);
+      throw new Error(`Failed to mark email as ${read ? 'read' : 'unread'}.`);
     }
   }
 
@@ -393,7 +392,7 @@ export class JmapClient {
     const result = response.methodResponses[0][1];
     
     if (result.notUpdated && result.notUpdated[emailId]) {
-      throw new Error(`Failed to delete email: ${JSON.stringify(result.notUpdated[emailId])}`);
+      throw new Error('Failed to delete email.');
     }
   }
 
@@ -421,7 +420,7 @@ export class JmapClient {
     const result = response.methodResponses[0][1];
     
     if (result.notUpdated && result.notUpdated[emailId]) {
-      throw new Error(`Failed to move email: ${JSON.stringify(result.notUpdated[emailId])}`);
+      throw new Error('Failed to move email.');
     }
   }
 
@@ -479,7 +478,7 @@ export class JmapClient {
     }
     
     if (!attachment) {
-      throw new Error(`Attachment not found. Available attachments: ${JSON.stringify(email.attachments?.map((a: any) => ({ partId: a.partId, name: a.name, blobId: a.blobId })) || [])}`);
+      throw new Error('Attachment not found.');
     }
 
     // Get the download URL from session
@@ -693,7 +692,7 @@ export class JmapClient {
     const result = response.methodResponses[0][1];
     
     if (result.notUpdated && Object.keys(result.notUpdated).length > 0) {
-      throw new Error(`Failed to update some emails: ${JSON.stringify(result.notUpdated)}`);
+      throw new Error('Failed to update some emails.');
     }
   }
 
@@ -722,7 +721,7 @@ export class JmapClient {
     const result = response.methodResponses[0][1];
     
     if (result.notUpdated && Object.keys(result.notUpdated).length > 0) {
-      throw new Error(`Failed to move some emails: ${JSON.stringify(result.notUpdated)}`);
+      throw new Error('Failed to move some emails.');
     }
   }
 
@@ -759,7 +758,7 @@ export class JmapClient {
     const result = response.methodResponses[0][1];
     
     if (result.notUpdated && Object.keys(result.notUpdated).length > 0) {
-      throw new Error(`Failed to delete some emails: ${JSON.stringify(result.notUpdated)}`);
+      throw new Error('Failed to delete some emails.');
     }
   }
 }
