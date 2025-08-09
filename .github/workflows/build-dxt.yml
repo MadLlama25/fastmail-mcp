@@ -1,0 +1,53 @@
+name: Build and Release DXT
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Pack DXT
+        run: npx --yes @anthropic-ai/dxt@latest pack
+
+      - name: Compute version and rename artifact
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          FILE=$(ls -1 *.dxt | head -n1)
+          mv "$FILE" "fastmail-mcp-$VERSION.dxt"
+          echo "DXT_FILE=fastmail-mcp-$VERSION.dxt" >> $GITHUB_ENV
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fastmail-mcp-dxt
+          path: ${{ env.DXT_FILE }}
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.DXT_FILE }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+
