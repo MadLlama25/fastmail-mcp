@@ -81,25 +81,26 @@ For development with auto-reload:
 npm run dev
 ```
 
-## MCP Client Configuration
+## Install as a Claude Desktop Extension (DXT)
 
-Add this server to your MCP client configuration. For example, with Claude Desktop:
+You can install this server as a Desktop Extension for Claude Desktop using the packaged `.dxt` file.
 
-```json
-{
-  "mcpServers": {
-    "fastmail": {
-      "command": "node",
-      "args": ["/path/to/fastmail-mcp/dist/index.js"],
-      "env": {
-        "FASTMAIL_API_TOKEN": "your_api_token_here"
-      }
-    }
-  }
-}
-```
+1. Build and pack:
+   ```bash
+   npm run build
+   npx dxt pack
+   ```
+   This produces `fastmail-mcp.dxt` in the project root.
 
-## Available Tools (32 Total)
+2. Install into Claude Desktop:
+   - Open the `.dxt` file, or drag it into Claude Desktop
+   - When prompted:
+     - Fastmail API Token: paste your token (stored encrypted by Claude)
+     - Fastmail Base URL: leave blank to use `https://api.fastmail.com` (default)
+
+3. Use any of the tools (e.g. `get_recent_emails`).
+
+## Available Tools (31 Total)
 
 **🎯 Most Popular Tools:**
 - **check_function_availability**: Check what's available and get setup guidance  
@@ -256,3 +257,10 @@ Use the built-in testing tools:
 - **test_bulk_operations**: Safely test bulk operations without making changes
 
 For more detailed error information, check the console output when running the server.
+
+## Privacy & Security
+
+- API tokens are stored encrypted by Claude Desktop when installed via the DXT and are never logged by this server.
+- The server avoids logging raw errors and sensitive data (tokens, email addresses, identities, attachment names/blobIds) in error messages.
+- Tool responses may include your email metadata/content by design (e.g., listing emails) but internal identifiers and credentials are not disclosed beyond what Fastmail returns for the requested data.
+- If you encounter errors, messages are sanitized and summarized to prevent leaking personal information.

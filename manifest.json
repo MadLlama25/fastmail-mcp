@@ -1,0 +1,40 @@
+{
+  "dxt_version": "0.1",
+  "name": "fastmail-mcp",
+  "version": "1.6.1",
+  "description": "MCP server for Fastmail API integration",
+  "author": {
+    "name": "Jeremy Gill"
+  },
+  "server": {
+    "type": "node",
+    "entry_point": "dist/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": [
+        "${__dirname}/dist/index.js"
+      ],
+      "env": {
+        "FASTMAIL_API_TOKEN": "${user_config.fastmail_api_token}",
+        "FASTMAIL_BASE_URL": "${user_config.fastmail_base_url}"
+      }
+    }
+  },
+  "user_config": {
+    "fastmail_api_token": {
+      "title": "Fastmail API Token",
+      "type": "string",
+      "description": "Fastmail API token (Settings → Privacy & Security → API tokens)",
+      "sensitive": true,
+      "required": true
+    },
+    "fastmail_base_url": {
+      "title": "Fastmail Base URL",
+      "type": "string",
+      "description": "Fastmail API base URL (leave default unless using a custom endpoint)",
+      "default": "https://api.fastmail.com",
+      "required": false
+    }
+  },
+  "license": "MIT"
+}

@@ -3,13 +3,25 @@ export interface FastmailConfig {
   baseUrl?: string;
 }
 
+function normalizeBaseUrl(input?: string): string {
+  const DEFAULT = 'https://api.fastmail.com';
+  if (!input) return DEFAULT;
+  let url = input.trim();
+  if (!url) return DEFAULT;
+  if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(url)) {
+    url = 'https://' + url;
+  }
+  url = url.replace(/\/+$/, '');
+  return url;
+}
+
 export class FastmailAuth {
   private apiToken: string;
   private baseUrl: string;
 
   constructor(config: FastmailConfig) {
     this.apiToken = config.apiToken;
-    this.baseUrl = config.baseUrl || 'https://api.fastmail.com';
+    this.baseUrl = normalizeBaseUrl(config.baseUrl);
   }
 
   getAuthHeaders(): Record<string, string> {
