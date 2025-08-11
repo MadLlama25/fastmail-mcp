@@ -81,6 +81,30 @@ For development with auto-reload:
 npm run dev
 ```
 
+### Run via npx (GitHub)
+
+Default to `main` branch:
+
+```bash
+FASTMAIL_API_TOKEN="your_token" FASTMAIL_BASE_URL="https://api.fastmail.com" \
+  npx --yes github:MadLlama25/fastmail-mcp fastmail-mcp
+```
+
+Windows PowerShell:
+
+```powershell
+$env:FASTMAIL_API_TOKEN="your_token"
+$env:FASTMAIL_BASE_URL="https://api.fastmail.com"
+npx --yes github:MadLlama25/fastmail-mcp fastmail-mcp
+```
+
+Pin to a tagged release:
+
+```bash
+FASTMAIL_API_TOKEN="your_token" \
+  npx --yes github:MadLlama25/fastmail-mcp@v1.6.1 fastmail-mcp
+```
+
 ## Install as a Claude Desktop Extension (DXT)
 
 You can install this server as a Desktop Extension for Claude Desktop using the packaged `.dxt` file.
