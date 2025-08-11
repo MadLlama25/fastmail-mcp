@@ -1,4 +1,3 @@
-import fetch from 'node-fetch';
 import { FastmailAuth } from './auth.js';
 
 export interface JmapSession {
