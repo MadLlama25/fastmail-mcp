@@ -1,3 +1,5 @@
+[![MSeeP.ai Security Assessment Badge](https://mseep.net/pr/madllama25-fastmail-mcp-badge.png)](https://mseep.ai/app/madllama25-fastmail-mcp)
+
 # Fastmail MCP Server
 
 A Model Context Protocol (MCP) server that provides access to the Fastmail API, enabling AI assistants to interact with email, contacts, and calendar data.
