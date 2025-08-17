@@ -124,6 +124,58 @@ You can install this server as a Desktop Extension for Claude Desktop using the 
 
 3. Use any of the tools (e.g. `get_recent_emails`).
 
+## Run as a remote WebSocket connector (beta)
+
+This mode enables multi-user connections from Claude Web/Desktop custom connectors. Each user provides their own Fastmail API token in the Claude client; the server does not store tokens.
+
+1. Build:
+   ```bash
+   npm run build
+   ```
+2. Run (WebSocket mode):
+   ```bash
+   MCP_TRANSPORT=ws PORT=3000 HOST=0.0.0.0 \
+   AUTH_HEADER=Authorization AUTH_SCHEME=Bearer \
+   FASTMAIL_BASE_URL="https://api.fastmail.com" \
+   node dist/index.js
+   ```
+3. Add a custom connector in Claude:
+   - URL: `wss://<your-domain>/mcp`
+   - Secret: paste your Fastmail API token (it will be forwarded as `Authorization: Bearer <token>`)
+
+Notes:
+- The server keeps tokens in-memory per connection only. No persistence.
+- Keep DXT/npx flows unchanged by omitting `MCP_TRANSPORT` (defaults to stdio).
+
+### Docker Compose (example)
+
+Create `docker-compose.yml` and `.env` (do not commit secrets):
+
+```yaml
+version: '3.8'
+services:
+  app:
+    build: .
+    image: fastmail-mcp:beta
+    restart: unless-stopped
+    environment:
+      MCP_TRANSPORT: ws
+      PORT: 3000
+      HOST: 0.0.0.0
+      WS_PATH: /mcp
+      AUTH_HEADER: Authorization
+      AUTH_SCHEME: Bearer
+      FASTMAIL_BASE_URL: ${FASTMAIL_BASE_URL:https://api.fastmail.com}
+    ports:
+      - "3000:3000"
+```
+
+Put this behind a TLS reverse proxy (Caddy/Nginx) and expose `wss://` on your domain.
+
+### Rate limits and safety
+- Tools are unchanged; respect Fastmail API limits. Prefer small `limit` values and staggered bulk ops.
+- The server does not cache responses containing personal data.
+
 ## Available Tools (31 Total)
 
 **🎯 Most Popular Tools:**
@@ -231,6 +283,7 @@ src/
 ├── auth.ts              # Authentication handling
 ├── jmap-client.ts       # JMAP client wrapper
 └── contacts-calendar.ts # Contacts and calendar extensions
+└── handlers.ts          # Tool registry (shared by stdio/ws)
 ```
 
 ### Building

@@ -29,24 +29,27 @@ jobs:
         run: npx --yes @anthropic-ai/dxt@latest pack
 
       - name: Compute version and rename artifact
+        id: compute
         shell: bash
         run: |
+          set -euo pipefail
           VERSION=$(node -p "require('./package.json').version")
           FILE=$(ls -1 *.dxt | head -n1)
-          mv "$FILE" "fastmail-mcp-$VERSION.dxt"
-          echo "DXT_FILE=fastmail-mcp-$VERSION.dxt" >> $GITHUB_ENV
+          NEW_NAME="fastmail-mcp-$VERSION.dxt"
+          mv "$FILE" "$NEW_NAME"
+          echo "dxt_file=$NEW_NAME" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: fastmail-mcp-dxt
-          path: ${{ env.DXT_FILE }}
+          path: ${{ steps.compute.outputs.dxt_file }}
 
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ env.DXT_FILE }}
+          files: ${{ steps.compute.outputs.dxt_file }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
