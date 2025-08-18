@@ -124,7 +124,7 @@ You can install this server as a Desktop Extension for Claude Desktop using the 
 
 3. Use any of the tools (e.g. `get_recent_emails`).
 
-## Run as a remote WebSocket connector (beta)
+## Run as a remote HTTPS (SSE) connector (beta)
 
 This mode enables multi-user connections from Claude Web/Desktop custom connectors. Each user provides their own Fastmail API token in the Claude client; the server does not store tokens.
 
@@ -132,16 +132,15 @@ This mode enables multi-user connections from Claude Web/Desktop custom connecto
    ```bash
    npm run build
    ```
-2. Run (WebSocket mode):
+2. Run (SSE mode):
    ```bash
-   MCP_TRANSPORT=ws PORT=3000 HOST=0.0.0.0 \
+   MCP_TRANSPORT=sse PORT=3000 HOST=0.0.0.0 \
    AUTH_HEADER=Authorization AUTH_SCHEME=Bearer \
-   CONNECTOR_SHARED_SECRET="<random-long-secret>" \
    FASTMAIL_BASE_URL="https://api.fastmail.com" \
    node dist/index.js
    ```
-3. Add a custom connector in Claude:
-   - URL: `wss://<your-domain>/mcp`
+3. Add a custom connector in Claude (HTTPS):
+   - URL: `https://<your-domain>/mcp`
    - Secret: paste your Fastmail API token (it will be forwarded as `Authorization: Bearer <token>`)
 
 Notes:
@@ -160,10 +159,9 @@ services:
     image: fastmail-mcp:beta
     restart: unless-stopped
     environment:
-      MCP_TRANSPORT: ws
+      MCP_TRANSPORT: sse
       PORT: 3000
       HOST: 0.0.0.0
-      WS_PATH: /mcp
       AUTH_HEADER: Authorization
       AUTH_SCHEME: Bearer
       CONNECTOR_SHARED_SECRET: ${CONNECTOR_SHARED_SECRET}
@@ -172,7 +170,17 @@ services:
       - "3000:3000"
 ```
 
-Put this behind a TLS reverse proxy (Caddy/Nginx) and expose `wss://` on your domain.
+Put this behind a TLS reverse proxy (Caddy/Nginx) and expose `https://` on your domain.
+
+#### Caddy example (SSE)
+```
+fastmail-mcp.example.com {
+  encode zstd gzip
+  reverse_proxy /mcp app:3000
+  reverse_proxy /mcp/messages app:3000
+  reverse_proxy /healthz app:3000
+}
+```
 
 ### .env file (example)
 Create a `.env` file alongside `docker-compose.yml`:

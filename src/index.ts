@@ -13,6 +13,7 @@ import { ContactsCalendarClient } from './contacts-calendar.js';
 import { registerHandlers } from './handlers.js';
 import http from 'node:http';
 import { WebSocketServer } from 'ws';
+import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 
 const server = new Server(
   {
@@ -1407,6 +1408,101 @@ async function runServer() {
 
     await new Promise<void>((resolve) => httpServer.listen(port, host, resolve));
     console.error(`Fastmail MCP server running on ws://${host}:${port}${wsPath}`);
+    return;
+  }
+
+  if (transportMode === 'sse') {
+    const port = parseInt(process.env.PORT || '3000', 10);
+    const host = process.env.HOST || '0.0.0.0';
+    const ssePath = process.env.SSE_PATH || '/mcp';
+    const messagesPath = `${ssePath.replace(/\/$/, '')}/messages`;
+    const authHeader = (process.env.AUTH_HEADER || 'authorization').toLowerCase();
+    const authScheme = (process.env.AUTH_SCHEME || 'bearer').toLowerCase();
+    const defaultBaseUrl = process.env.FASTMAIL_BASE_URL;
+    const sharedSecret = process.env.CONNECTOR_SHARED_SECRET;
+
+    const transports = new Map<string, SSEServerTransport>();
+
+    const httpServer = http.createServer(async (req, res) => {
+      const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+
+      if (url.pathname === '/healthz') {
+        res.writeHead(200).end('ok');
+        return;
+      }
+
+      // Initial SSE connect
+      if (req.method === 'GET' && url.pathname === ssePath) {
+        // Auth: Authorization: Bearer <Fastmail token>
+        const headers = req.headers;
+        let headerVal: string | undefined;
+        for (const [key, value] of Object.entries(headers)) {
+          if (key.toLowerCase() === authHeader && typeof value === 'string') {
+            headerVal = value;
+            break;
+          }
+        }
+        let token: string | undefined;
+        if (headerVal) {
+          const [scheme, rest] = headerVal.split(' ');
+          if (scheme && rest && scheme.toLowerCase() === authScheme) {
+            token = rest.trim();
+          }
+        }
+        if (!token) {
+          res.writeHead(401).end('unauthorized');
+          return;
+        }
+
+        // Optional shared secret (Claude cannot send custom headers; leave unset for Claude Web)
+        if (sharedSecret) {
+          const provided = (headers['x-connector-secret'] as string | undefined) || '';
+          if (provided !== sharedSecret) {
+            res.writeHead(403).end('forbidden');
+            return;
+          }
+        }
+
+        // Create per-connection server and SSE transport
+        const connServer = new Server(
+          { name: 'fastmail-mcp', version: '1.6.1' },
+          { capabilities: { tools: {} } }
+        );
+
+        const auth = new FastmailAuth({ apiToken: token, baseUrl: defaultBaseUrl });
+        const jmap = new JmapClient(auth, { maxConcurrent: 2, maxQueue: 50, baseDelayMs: 300, maxDelayMs: 5000 });
+        const contacts = new ContactsCalendarClient(auth);
+        registerHandlers(connServer, {
+          getJmapClient: () => jmap,
+          getContactsClient: () => contacts,
+        });
+
+        const transport = new SSEServerTransport(messagesPath, res);
+        transports.set(transport.sessionId, transport);
+        transport.onclose = () => {
+          transports.delete(transport.sessionId);
+        };
+        await connServer.connect(transport as any);
+        return;
+      }
+
+      // POST messages from client (Claude) to server
+      if (req.method === 'POST' && url.pathname === messagesPath) {
+        const sessionId = url.searchParams.get('sessionId') || '';
+        const transport = transports.get(sessionId);
+        if (!transport) {
+          res.writeHead(404).end('unknown session');
+          return;
+        }
+        await transport.handlePostMessage(req, res);
+        return;
+      }
+
+      res.writeHead(404).end('not found');
+    });
+
+    await new Promise<void>((resolve) => httpServer.listen(port, host, resolve));
+    console.error(`Fastmail MCP server (SSE) on http://${host}:${port}${ssePath}`);
     return;
   }
 

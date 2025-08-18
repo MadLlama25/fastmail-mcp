@@ -4,10 +4,9 @@ services:
     image: fastmail-mcp:beta
     restart: unless-stopped
     environment:
-      MCP_TRANSPORT: ws
+      MCP_TRANSPORT: sse
       PORT: 3000
       HOST: 0.0.0.0
-      WS_PATH: /mcp
       AUTH_HEADER: Authorization
       AUTH_SCHEME: Bearer
       CONNECTOR_SHARED_SECRET: ${CONNECTOR_SHARED_SECRET}
