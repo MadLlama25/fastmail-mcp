@@ -154,7 +154,6 @@ Notes:
 Create `docker-compose.yml` and `.env` (do not commit secrets):
 
 ```yaml
-version: '3.8'
 services:
   app:
     build: .
