@@ -1494,6 +1494,12 @@ async function runServer() {
             session.context.token = rest.trim();
           }
         }
+        if (!session.context.token) {
+          res.writeHead(401, {
+            'WWW-Authenticate': 'Bearer realm="fastmail", charset="UTF-8"'
+          }).end('authorization required');
+          return;
+        }
         await session.transport.handlePostMessage(req, res);
         return;
       }
