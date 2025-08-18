@@ -1318,6 +1318,7 @@ async function runServer() {
     const authScheme = (process.env.AUTH_SCHEME || 'bearer').toLowerCase();
     const defaultBaseUrl = process.env.FASTMAIL_BASE_URL;
     const wsPath = process.env.WS_PATH || '/mcp';
+    const sharedSecret = process.env.CONNECTOR_SHARED_SECRET;
 
     const httpServer = http.createServer((req, res) => {
       if (req.url === '/healthz') {
@@ -1351,6 +1352,15 @@ async function runServer() {
         return;
       }
 
+      // Optional shared secret gate
+      if (sharedSecret) {
+        const providedSecret = (headers['x-connector-secret'] as string | undefined) || '';
+        if (providedSecret !== sharedSecret) {
+          try { ws.close(4403, 'forbidden'); } catch {}
+          return;
+        }
+      }
+
       // Per-connection server
       const connServer = new Server(
         { name: 'fastmail-mcp', version: '1.6.1' },
@@ -1358,7 +1368,7 @@ async function runServer() {
       );
 
       const auth = new FastmailAuth({ apiToken: token, baseUrl: defaultBaseUrl });
-      const jmap = new JmapClient(auth);
+      const jmap = new JmapClient(auth, { maxConcurrent: 2, maxQueue: 50, baseDelayMs: 300, maxDelayMs: 5000 });
       const contacts = new ContactsCalendarClient(auth);
       registerHandlers(connServer, {
         getJmapClient: () => jmap,

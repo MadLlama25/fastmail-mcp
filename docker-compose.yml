@@ -11,6 +11,7 @@ services:
       WS_PATH: /mcp
       AUTH_HEADER: Authorization
       AUTH_SCHEME: Bearer
+      CONNECTOR_SHARED_SECRET: ${CONNECTOR_SHARED_SECRET}
       FASTMAIL_BASE_URL: ${FASTMAIL_BASE_URL:https://api.fastmail.com}
     ports:
       - "3000:3000"

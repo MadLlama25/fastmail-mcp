@@ -21,9 +21,19 @@ export interface JmapResponse {
 export class JmapClient {
   private auth: FastmailAuth;
   private session: JmapSession | null = null;
+  private inFlight: number = 0;
+  private readonly maxConcurrent: number;
+  private readonly maxQueue: number;
+  private queue: Array<() => void> = [];
+  private readonly baseDelayMs: number;
+  private readonly maxDelayMs: number;
 
-  constructor(auth: FastmailAuth) {
+  constructor(auth: FastmailAuth, options?: { maxConcurrent?: number; maxQueue?: number; baseDelayMs?: number; maxDelayMs?: number; }) {
     this.auth = auth;
+    this.maxConcurrent = Math.max(1, options?.maxConcurrent ?? 2);
+    this.maxQueue = Math.max(10, options?.maxQueue ?? 50);
+    this.baseDelayMs = options?.baseDelayMs ?? 250;
+    this.maxDelayMs = options?.maxDelayMs ?? 4000;
   }
 
   async getSession(): Promise<JmapSession> {
@@ -63,20 +73,57 @@ export class JmapClient {
     }
   }
 
-  async makeRequest(request: JmapRequest): Promise<JmapResponse> {
-    const session = await this.getSession();
-    
-    const response = await fetch(session.apiUrl, {
-      method: 'POST',
-      headers: this.auth.getAuthHeaders(),
-      body: JSON.stringify(request)
-    });
-
-    if (!response.ok) {
-      throw new Error(`JMAP request failed: ${response.statusText}`);
+  private async schedule<T>(fn: () => Promise<T>): Promise<T> {
+    if (this.inFlight >= this.maxConcurrent) {
+      if (this.queue.length >= this.maxQueue) {
+        throw new Error('Too many concurrent requests. Please slow down.');
+      }
+      await new Promise<void>((resolve) => this.queue.push(resolve));
     }
+    this.inFlight++;
+    try {
+      return await fn();
+    } finally {
+      this.inFlight--;
+      const next = this.queue.shift();
+      if (next) next();
+    }
+  }
 
-    return await response.json() as JmapResponse;
+  private async withBackoff<T>(op: () => Promise<T>): Promise<T> {
+    let attempt = 0;
+    while (true) {
+      try {
+        return await op();
+      } catch (error) {
+        const status = (error as any)?.status || (error as any)?.code;
+        const message = (error as any)?.message || '';
+        const isRetryable = status === 429 || (typeof status === 'number' && status >= 500 && status < 600);
+        if (!isRetryable && !/rate|throttl/i.test(message)) throw error;
+        const delay = Math.min(this.maxDelayMs, this.baseDelayMs * Math.pow(2, attempt++));
+        await new Promise((r) => setTimeout(r, delay + Math.floor(Math.random() * 200)));
+      }
+    }
+  }
+
+  async makeRequest(request: JmapRequest): Promise<JmapResponse> {
+    return this.schedule(() => this.withBackoff(async () => {
+      const session = await this.getSession();
+      
+      const response = await fetch(session.apiUrl, {
+        method: 'POST',
+        headers: this.auth.getAuthHeaders(),
+        body: JSON.stringify(request)
+      });
+
+      if (!response.ok) {
+        const err: any = new Error(`JMAP request failed: ${response.status} ${response.statusText}`);
+        err.status = response.status;
+        throw err;
+      }
+
+      return await response.json() as JmapResponse;
+    }));
   }
 
   async getMailboxes(): Promise<any[]> {

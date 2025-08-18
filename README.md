@@ -136,6 +136,7 @@ This mode enables multi-user connections from Claude Web/Desktop custom connecto
    ```bash
    MCP_TRANSPORT=ws PORT=3000 HOST=0.0.0.0 \
    AUTH_HEADER=Authorization AUTH_SCHEME=Bearer \
+   CONNECTOR_SHARED_SECRET="<random-long-secret>" \
    FASTMAIL_BASE_URL="https://api.fastmail.com" \
    node dist/index.js
    ```
@@ -146,6 +147,7 @@ This mode enables multi-user connections from Claude Web/Desktop custom connecto
 Notes:
 - The server keeps tokens in-memory per connection only. No persistence.
 - Keep DXT/npx flows unchanged by omitting `MCP_TRANSPORT` (defaults to stdio).
+- You can optionally require `X-Connector-Secret` to match `CONNECTOR_SHARED_SECRET` for extra protection.
 
 ### Docker Compose (example)
 
@@ -165,6 +167,7 @@ services:
       WS_PATH: /mcp
       AUTH_HEADER: Authorization
       AUTH_SCHEME: Bearer
+      CONNECTOR_SHARED_SECRET: ${CONNECTOR_SHARED_SECRET}
       FASTMAIL_BASE_URL: ${FASTMAIL_BASE_URL:https://api.fastmail.com}
     ports:
       - "3000:3000"
@@ -175,6 +178,8 @@ Put this behind a TLS reverse proxy (Caddy/Nginx) and expose `wss://` on your do
 ### Rate limits and safety
 - Tools are unchanged; respect Fastmail API limits. Prefer small `limit` values and staggered bulk ops.
 - The server does not cache responses containing personal data.
+- Built-in gentle concurrency limits (2 in-flight per connection) and exponential backoff on 429/5xx help avoid rate limits.
+ - Logs are JSON lines; keep 7 days by rotating via your process manager or logrotate.
 
 ## Available Tools (31 Total)
 
