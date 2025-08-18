@@ -1421,7 +1421,7 @@ async function runServer() {
     const defaultBaseUrl = process.env.FASTMAIL_BASE_URL;
     const sharedSecret = process.env.CONNECTOR_SHARED_SECRET;
 
-    const transports = new Map<string, SSEServerTransport>();
+    const sessions = new Map<string, { transport: SSEServerTransport; context: { token?: string; jmap?: JmapClient; contacts?: ContactsCalendarClient }; server: Server }>();
 
     const httpServer = http.createServer(async (req, res) => {
       const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
@@ -1431,56 +1431,42 @@ async function runServer() {
         return;
       }
 
-      // Initial SSE connect
+      // Initial SSE connect (allow unauthenticated so Claude can add the connector)
       if (req.method === 'GET' && url.pathname === ssePath) {
-        // Auth: Authorization: Bearer <Fastmail token>
-        const headers = req.headers;
-        let headerVal: string | undefined;
-        for (const [key, value] of Object.entries(headers)) {
-          if (key.toLowerCase() === authHeader && typeof value === 'string') {
-            headerVal = value;
-            break;
-          }
-        }
-        let token: string | undefined;
-        if (headerVal) {
-          const [scheme, rest] = headerVal.split(' ');
-          if (scheme && rest && scheme.toLowerCase() === authScheme) {
-            token = rest.trim();
-          }
-        }
-        if (!token) {
-          res.writeHead(401).end('unauthorized');
-          return;
-        }
-
-        // Optional shared secret (Claude cannot send custom headers; leave unset for Claude Web)
-        if (sharedSecret) {
-          const provided = (headers['x-connector-secret'] as string | undefined) || '';
-          if (provided !== sharedSecret) {
-            res.writeHead(403).end('forbidden');
-            return;
-          }
-        }
-
         // Create per-connection server and SSE transport
         const connServer = new Server(
           { name: 'fastmail-mcp', version: '1.6.1' },
           { capabilities: { tools: {} } }
         );
 
-        const auth = new FastmailAuth({ apiToken: token, baseUrl: defaultBaseUrl });
-        const jmap = new JmapClient(auth, { maxConcurrent: 2, maxQueue: 50, baseDelayMs: 300, maxDelayMs: 5000 });
-        const contacts = new ContactsCalendarClient(auth);
+        const context: { token?: string; jmap?: JmapClient; contacts?: ContactsCalendarClient } = {};
         registerHandlers(connServer, {
-          getJmapClient: () => jmap,
-          getContactsClient: () => contacts,
+          getJmapClient: () => {
+            if (!context.token) {
+              throw new McpError(ErrorCode.InvalidRequest, 'Missing authorization. Please connect the connector with your Fastmail API token.');
+            }
+            if (!context.jmap) {
+              const auth = new FastmailAuth({ apiToken: context.token, baseUrl: defaultBaseUrl });
+              context.jmap = new JmapClient(auth, { maxConcurrent: 2, maxQueue: 50, baseDelayMs: 300, maxDelayMs: 5000 });
+            }
+            return context.jmap;
+          },
+          getContactsClient: () => {
+            if (!context.token) {
+              throw new McpError(ErrorCode.InvalidRequest, 'Missing authorization. Please connect the connector with your Fastmail API token.');
+            }
+            if (!context.contacts) {
+              const auth = new FastmailAuth({ apiToken: context.token, baseUrl: defaultBaseUrl });
+              context.contacts = new ContactsCalendarClient(auth);
+            }
+            return context.contacts;
+          },
         });
 
         const transport = new SSEServerTransport(messagesPath, res);
-        transports.set(transport.sessionId, transport);
+        sessions.set(transport.sessionId, { transport, context, server: connServer });
         transport.onclose = () => {
-          transports.delete(transport.sessionId);
+          sessions.delete(transport.sessionId);
         };
         await connServer.connect(transport as any);
         return;
@@ -1489,12 +1475,26 @@ async function runServer() {
       // POST messages from client (Claude) to server
       if (req.method === 'POST' && url.pathname === messagesPath) {
         const sessionId = url.searchParams.get('sessionId') || '';
-        const transport = transports.get(sessionId);
-        if (!transport) {
+        const session = sessions.get(sessionId);
+        if (!session) {
           res.writeHead(404).end('unknown session');
           return;
         }
-        await transport.handlePostMessage(req, res);
+        // Capture Authorization token on first POST (Claude sends the secret now)
+        const headers = req.headers;
+        let headerVal: string | undefined;
+        for (const [key, value] of Object.entries(headers)) {
+          if (key.toLowerCase() === authHeader && typeof value === 'string') {
+            headerVal = value; break;
+          }
+        }
+        if (headerVal) {
+          const [scheme, rest] = headerVal.split(' ');
+          if (scheme && rest && scheme.toLowerCase() === authScheme) {
+            session.context.token = rest.trim();
+          }
+        }
+        await session.transport.handlePostMessage(req, res);
         return;
       }
 
