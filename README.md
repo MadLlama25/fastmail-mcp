@@ -168,12 +168,20 @@ services:
       AUTH_HEADER: Authorization
       AUTH_SCHEME: Bearer
       CONNECTOR_SHARED_SECRET: ${CONNECTOR_SHARED_SECRET}
-      FASTMAIL_BASE_URL: ${FASTMAIL_BASE_URL:https://api.fastmail.com}
+      FASTMAIL_BASE_URL: ${FASTMAIL_BASE_URL}
     ports:
       - "3000:3000"
 ```
 
 Put this behind a TLS reverse proxy (Caddy/Nginx) and expose `wss://` on your domain.
+
+### .env file (example)
+Create a `.env` file alongside `docker-compose.yml`:
+```env
+FASTMAIL_BASE_URL=https://api.fastmail.com
+# Optional extra gate for WS connects; comment out to disable
+# CONNECTOR_SHARED_SECRET=your_shared_secret
+```
 
 ### Rate limits and safety
 - Tools are unchanged; respect Fastmail API limits. Prefer small `limit` values and staggered bulk ops.
