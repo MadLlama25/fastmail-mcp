@@ -238,7 +238,7 @@ export class JmapClient {
     const emailObject = {
       mailboxIds: initialMailboxIds,
       keywords: { $draft: true },
-      from: [{ email: fromEmail }],
+      from: [{ name: selectedIdentity.name, email: fromEmail }],
       to: email.to.map(addr => ({ email: addr })),
       cc: email.cc?.map(addr => ({ email: addr })) || [],
       bcc: email.bcc?.map(addr => ({ email: addr })) || [],
