@@ -128,7 +128,7 @@ export class JmapClient {
         ['Email/get', {
           accountId: session.accountId,
           ids: [id],
-          properties: ['id', 'subject', 'from', 'to', 'cc', 'bcc', 'receivedAt', 'textBody', 'htmlBody', 'attachments', 'bodyValues'],
+          properties: ['id', 'subject', 'from', 'to', 'cc', 'bcc', 'receivedAt', 'textBody', 'htmlBody', 'attachments', 'bodyValues', 'messageId', 'threadId', 'inReplyTo', 'references'],
           bodyProperties: ['partId', 'blobId', 'type', 'size'],
           fetchTextBodyValues: true,
           fetchHTMLBodyValues: true,
@@ -183,6 +183,8 @@ export class JmapClient {
     htmlBody?: string;
     from?: string;
     mailboxId?: string;
+    inReplyTo?: string[];
+    references?: string[];
   }): Promise<string> {
     const session = await this.getSession();
 
@@ -243,6 +245,8 @@ export class JmapClient {
       cc: email.cc?.map(addr => ({ email: addr })) || [],
       bcc: email.bcc?.map(addr => ({ email: addr })) || [],
       subject: email.subject,
+      ...(email.inReplyTo && { inReplyTo: email.inReplyTo }),
+      ...(email.references && { references: email.references }),
       textBody: email.textBody ? [{ partId: 'text', type: 'text/plain' }] : undefined,
       htmlBody: email.htmlBody ? [{ partId: 'html', type: 'text/html' }] : undefined,
       bodyValues: {

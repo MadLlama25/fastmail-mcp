@@ -216,8 +216,59 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: 'string',
               description: 'HTML body (optional)',
             },
+            inReplyTo: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Message-ID(s) of the email being replied to (optional, for threading)',
+            },
+            references: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Full reference chain of Message-IDs (optional, for threading)',
+            },
           },
           required: ['to', 'subject'],
+        },
+      },
+      {
+        name: 'reply_email',
+        description: 'Reply to an existing email with proper threading headers (In-Reply-To, References). Automatically fetches the original email to build the reply chain.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            originalEmailId: {
+              type: 'string',
+              description: 'ID of the email to reply to',
+            },
+            to: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Recipient email addresses (optional, defaults to the original sender)',
+            },
+            cc: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'CC email addresses (optional)',
+            },
+            bcc: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'BCC email addresses (optional)',
+            },
+            from: {
+              type: 'string',
+              description: 'Sender email address (optional, defaults to account primary email)',
+            },
+            textBody: {
+              type: 'string',
+              description: 'Plain text body (optional)',
+            },
+            htmlBody: {
+              type: 'string',
+              description: 'HTML body (optional)',
+            },
+          },
+          required: ['originalEmailId'],
         },
       },
       {
@@ -701,7 +752,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'send_email': {
-        const { to, cc, bcc, from, mailboxId, subject, textBody, htmlBody } = args as any;
+        const { to, cc, bcc, from, mailboxId, subject, textBody, htmlBody, inReplyTo, references } = args as any;
         if (!to || !Array.isArray(to) || to.length === 0) {
           throw new McpError(ErrorCode.InvalidParams, 'to field is required and must be a non-empty array');
         }
@@ -721,6 +772,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           subject,
           textBody,
           htmlBody,
+          inReplyTo,
+          references,
         });
 
         return {
@@ -728,6 +781,67 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             {
               type: 'text',
               text: `Email sent successfully. Submission ID: ${submissionId}`,
+            },
+          ],
+        };
+      }
+
+      case 'reply_email': {
+        const { originalEmailId, to, cc, bcc, from, textBody, htmlBody } = args as any;
+        if (!originalEmailId) {
+          throw new McpError(ErrorCode.InvalidParams, 'originalEmailId is required');
+        }
+        if (!textBody && !htmlBody) {
+          throw new McpError(ErrorCode.InvalidParams, 'Either textBody or htmlBody is required');
+        }
+
+        // Fetch the original email to get threading headers
+        const originalEmail = await client.getEmailById(originalEmailId);
+
+        // Build threading headers
+        const originalMessageId = originalEmail.messageId?.[0];
+        if (!originalMessageId) {
+          throw new McpError(ErrorCode.InternalError, 'Original email does not have a Message-ID; cannot thread reply');
+        }
+
+        const inReplyToHeader = [originalMessageId];
+        const referencesHeader = [
+          ...(originalEmail.references || []),
+          originalMessageId,
+        ];
+
+        // Build subject with Re: prefix
+        let replySubject = originalEmail.subject || '';
+        if (!/^Re:/i.test(replySubject)) {
+          replySubject = `Re: ${replySubject}`;
+        }
+
+        // Default recipients to the original sender
+        const replyTo = (to && Array.isArray(to) && to.length > 0)
+          ? to
+          : originalEmail.from?.map((addr: any) => addr.email).filter(Boolean) || [];
+
+        if (replyTo.length === 0) {
+          throw new McpError(ErrorCode.InvalidParams, 'Could not determine reply recipient. Please provide "to" explicitly.');
+        }
+
+        const submissionId = await client.sendEmail({
+          to: replyTo,
+          cc,
+          bcc,
+          from,
+          subject: replySubject,
+          textBody,
+          htmlBody,
+          inReplyTo: inReplyToHeader,
+          references: referencesHeader,
+        });
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Reply sent successfully. Submission ID: ${submissionId}`,
             },
           ],
         };
