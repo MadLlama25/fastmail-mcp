@@ -216,6 +216,15 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: 'string',
               description: 'HTML body (optional)',
             },
+            inReplyTo: {
+              type: 'string',
+              description: 'Message-ID of the email being replied to (for threading)',
+            },
+            references: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Message-IDs for thread continuity',
+            },
           },
           required: ['to', 'subject'],
         },
@@ -701,7 +710,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'send_email': {
-        const { to, cc, bcc, from, mailboxId, subject, textBody, htmlBody } = args as any;
+        const { to, cc, bcc, from, mailboxId, subject, textBody, htmlBody, inReplyTo, references } = args as any;
         if (!to || !Array.isArray(to) || to.length === 0) {
           throw new McpError(ErrorCode.InvalidParams, 'to field is required and must be a non-empty array');
         }
@@ -721,6 +730,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           subject,
           textBody,
           htmlBody,
+          inReplyTo,
+          references,
         });
 
         return {

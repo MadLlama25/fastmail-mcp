@@ -128,7 +128,7 @@ export class JmapClient {
         ['Email/get', {
           accountId: session.accountId,
           ids: [id],
-          properties: ['id', 'subject', 'from', 'to', 'cc', 'bcc', 'receivedAt', 'textBody', 'htmlBody', 'attachments', 'bodyValues'],
+          properties: ['id', 'messageId', 'references', 'subject', 'from', 'to', 'cc', 'bcc', 'receivedAt', 'textBody', 'htmlBody', 'attachments', 'bodyValues'],
           bodyProperties: ['partId', 'blobId', 'type', 'size'],
           fetchTextBodyValues: true,
           fetchHTMLBodyValues: true,
@@ -183,6 +183,8 @@ export class JmapClient {
     htmlBody?: string;
     from?: string;
     mailboxId?: string;
+    inReplyTo?: string;      // Message-ID of email being replied to
+    references?: string[];   // Thread Message-IDs for continuity
   }): Promise<string> {
     const session = await this.getSession();
 
@@ -235,7 +237,7 @@ export class JmapClient {
     const sentMailboxIds: Record<string, boolean> = {};
     sentMailboxIds[sentMailbox.id] = true;
 
-    const emailObject = {
+    const emailObject: Record<string, any> = {
       mailboxIds: initialMailboxIds,
       keywords: { $draft: true },
       from: [{ email: fromEmail }],
@@ -250,6 +252,14 @@ export class JmapClient {
         ...(email.htmlBody && { html: { value: email.htmlBody } })
       }
     };
+
+    // Add reply headers for proper threading
+    if (email.inReplyTo) {
+      emailObject.inReplyTo = email.inReplyTo;
+    }
+    if (email.references && email.references.length > 0) {
+      emailObject.references = email.references.join(' ');
+    }
 
     const request: JmapRequest = {
       using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail', 'urn:ietf:params:jmap:submission'],
