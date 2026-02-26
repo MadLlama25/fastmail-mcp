@@ -297,6 +297,98 @@ export class JmapClient {
     return submissionResult.created?.submission?.id || 'unknown';
   }
 
+  async createDraft(email: {
+    to?: string[];
+    cc?: string[];
+    bcc?: string[];
+    subject?: string;
+    textBody?: string;
+    htmlBody?: string;
+    from?: string;
+    mailboxId?: string;
+  }): Promise<string> {
+    const session = await this.getSession();
+
+    // Validate at least one meaningful field is present
+    if (!email.to?.length && !email.subject && !email.textBody && !email.htmlBody) {
+      throw new Error('At least one of to, subject, textBody, or htmlBody must be provided');
+    }
+
+    // Get all identities to resolve from address
+    const identities = await this.getIdentities();
+    if (!identities || identities.length === 0) {
+      throw new Error('No sending identities found');
+    }
+
+    let selectedIdentity;
+    if (email.from) {
+      selectedIdentity = identities.find(id =>
+        id.email.toLowerCase() === email.from?.toLowerCase()
+      );
+      if (!selectedIdentity) {
+        throw new Error('From address is not verified for sending. Choose one of your verified identities.');
+      }
+    } else {
+      selectedIdentity = identities.find(id => id.mayDelete === false) || identities[0];
+    }
+
+    const fromEmail = selectedIdentity.email;
+
+    // Resolve drafts mailbox
+    let draftMailboxId: string;
+    if (email.mailboxId) {
+      draftMailboxId = email.mailboxId;
+    } else {
+      const mailboxes = await this.getMailboxes();
+      const draftsMailbox = mailboxes.find(mb => mb.role === 'drafts') || mailboxes.find(mb => mb.name.toLowerCase().includes('draft'));
+      if (!draftsMailbox) {
+        throw new Error('Could not find Drafts mailbox');
+      }
+      draftMailboxId = draftsMailbox.id;
+    }
+
+    const mailboxIds: Record<string, boolean> = {};
+    mailboxIds[draftMailboxId] = true;
+
+    const emailObject: any = {
+      mailboxIds,
+      keywords: { $draft: true },
+      from: [{ email: fromEmail }],
+    };
+
+    if (email.to?.length) emailObject.to = email.to.map(addr => ({ email: addr }));
+    if (email.cc?.length) emailObject.cc = email.cc.map(addr => ({ email: addr }));
+    if (email.bcc?.length) emailObject.bcc = email.bcc.map(addr => ({ email: addr }));
+    if (email.subject) emailObject.subject = email.subject;
+    if (email.textBody) emailObject.textBody = [{ partId: 'text', type: 'text/plain' }];
+    if (email.htmlBody) emailObject.htmlBody = [{ partId: 'html', type: 'text/html' }];
+    if (email.textBody || email.htmlBody) {
+      emailObject.bodyValues = {
+        ...(email.textBody && { text: { value: email.textBody } }),
+        ...(email.htmlBody && { html: { value: email.htmlBody } })
+      };
+    }
+
+    const request: JmapRequest = {
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
+      methodCalls: [
+        ['Email/set', {
+          accountId: session.accountId,
+          create: { draft: emailObject }
+        }, 'createDraft']
+      ]
+    };
+
+    const response = await this.makeRequest(request);
+
+    const result = response.methodResponses[0][1];
+    if (result.notCreated && result.notCreated.draft) {
+      throw new Error('Failed to create draft. Please check inputs and try again.');
+    }
+
+    return result.created?.draft?.id || 'unknown';
+  }
+
   async getRecentEmails(limit: number = 10, mailboxName: string = 'inbox'): Promise<any[]> {
     const session = await this.getSession();
     
