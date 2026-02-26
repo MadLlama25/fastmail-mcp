@@ -281,20 +281,42 @@ export class JmapClient {
     };
 
     const response = await this.makeRequest(request);
-    
-    // Check if email creation was successful
+
+    // Check for JMAP method-level error on Email/set
+    if (response.methodResponses[0][0] === 'error') {
+      const err = response.methodResponses[0][1];
+      throw new Error(`JMAP error creating email: ${err.type}${err.description ? ' - ' + err.description : ''}`);
+    }
+
     const emailResult = response.methodResponses[0][1];
-    if (emailResult.notCreated && emailResult.notCreated.draft) {
-      throw new Error('Failed to create email. Please check inputs and try again.');
+    if (emailResult.notCreated?.draft) {
+      const err = emailResult.notCreated.draft;
+      throw new Error(`Failed to create email: ${err.type}${err.description ? ' - ' + err.description : ''}`);
     }
-    
-    // Check if email submission was successful
+
+    const emailId = emailResult.created?.draft?.id;
+    if (!emailId) {
+      throw new Error('Email creation returned no email ID');
+    }
+
+    // Check for JMAP method-level error on EmailSubmission/set
+    if (response.methodResponses[1][0] === 'error') {
+      const err = response.methodResponses[1][1];
+      throw new Error(`JMAP error submitting email: ${err.type}${err.description ? ' - ' + err.description : ''}`);
+    }
+
     const submissionResult = response.methodResponses[1][1];
-    if (submissionResult.notCreated && submissionResult.notCreated.submission) {
-      throw new Error('Failed to submit email. Please try again later.');
+    if (submissionResult.notCreated?.submission) {
+      const err = submissionResult.notCreated.submission;
+      throw new Error(`Failed to submit email: ${err.type}${err.description ? ' - ' + err.description : ''}`);
     }
-    
-    return submissionResult.created?.submission?.id || 'unknown';
+
+    const submissionId = submissionResult.created?.submission?.id;
+    if (!submissionId) {
+      throw new Error('Email submission returned no submission ID');
+    }
+
+    return submissionId;
   }
 
   async createDraft(email: {
@@ -381,12 +403,27 @@ export class JmapClient {
 
     const response = await this.makeRequest(request);
 
-    const result = response.methodResponses[0][1];
-    if (result.notCreated && result.notCreated.draft) {
-      throw new Error('Failed to create draft. Please check inputs and try again.');
+    // Bug 1: Check for JMAP method-level error
+    if (response.methodResponses[0][0] === 'error') {
+      const err = response.methodResponses[0][1];
+      throw new Error(`JMAP error: ${err.type}${err.description ? ' - ' + err.description : ''}`);
     }
 
-    return result.created?.draft?.id || 'unknown';
+    const result = response.methodResponses[0][1];
+
+    // Bug 2: Propagate server-provided error details from notCreated
+    if (result.notCreated?.draft) {
+      const err = result.notCreated.draft;
+      throw new Error(`Failed to create draft: ${err.type}${err.description ? ' - ' + err.description : ''}`);
+    }
+
+    // Bug 3: Throw if created ID is missing instead of returning 'unknown'
+    const emailId = result.created?.draft?.id;
+    if (!emailId) {
+      throw new Error('Draft creation returned no email ID');
+    }
+
+    return emailId;
   }
 
   async getRecentEmails(limit: number = 10, mailboxName: string = 'inbox'): Promise<any[]> {
