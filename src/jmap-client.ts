@@ -44,7 +44,7 @@ export class JmapClient {
     
     this.session = {
       apiUrl: sessionData.apiUrl,
-      accountId: Object.keys(sessionData.accounts)[0],
+      accountId: sessionData.primaryAccounts?.['urn:ietf:params:jmap:mail'] ?? Object.keys(sessionData.accounts)[0],
       capabilities: sessionData.capabilities,
       downloadUrl: sessionData.downloadUrl,
       uploadUrl: sessionData.uploadUrl
