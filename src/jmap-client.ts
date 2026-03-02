@@ -398,8 +398,28 @@ export class JmapClient {
   async moveEmail(emailId: string, targetMailboxId: string): Promise<void> {
     const session = await this.getSession();
 
-    const targetMailboxIds: Record<string, boolean> = {};
-    targetMailboxIds[targetMailboxId] = true;
+    // Fetch current mailboxIds to build a proper JMAP patch
+    const getRequest: JmapRequest = {
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
+      methodCalls: [
+        ['Email/get', {
+          accountId: session.accountId,
+          ids: [emailId],
+          properties: ['mailboxIds']
+        }, 'getEmail']
+      ]
+    };
+    const getResponse = await this.makeRequest(getRequest);
+    const email = getResponse.methodResponses[0][1].list[0];
+
+    // Build patch: remove from all current mailboxes, add to target
+    const patch: Record<string, boolean | null> = {};
+    if (email?.mailboxIds) {
+      for (const mbId of Object.keys(email.mailboxIds)) {
+        patch[`mailboxIds/${mbId}`] = null;
+      }
+    }
+    patch[`mailboxIds/${targetMailboxId}`] = true;
 
     const request: JmapRequest = {
       using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
@@ -407,9 +427,7 @@ export class JmapClient {
         ['Email/set', {
           accountId: session.accountId,
           update: {
-            [emailId]: {
-              mailboxIds: targetMailboxIds
-            }
+            [emailId]: patch
           }
         }, 'moveEmail']
       ]
@@ -417,7 +435,7 @@ export class JmapClient {
 
     const response = await this.makeRequest(request);
     const result = response.methodResponses[0][1];
-    
+
     if (result.notUpdated && result.notUpdated[emailId]) {
       throw new Error('Failed to move email.');
     }
@@ -698,12 +716,31 @@ export class JmapClient {
   async bulkMove(emailIds: string[], targetMailboxId: string): Promise<void> {
     const session = await this.getSession();
 
-    const targetMailboxIds: Record<string, boolean> = {};
-    targetMailboxIds[targetMailboxId] = true;
+    // Fetch current mailboxIds for all emails to build proper JMAP patches
+    const getRequest: JmapRequest = {
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
+      methodCalls: [
+        ['Email/get', {
+          accountId: session.accountId,
+          ids: emailIds,
+          properties: ['id', 'mailboxIds']
+        }, 'getEmails']
+      ]
+    };
+    const getResponse = await this.makeRequest(getRequest);
+    const emails: any[] = getResponse.methodResponses[0][1].list;
+    const mailboxMap: Record<string, Record<string, boolean>> = {};
+    emails.forEach((e: any) => { mailboxMap[e.id] = e.mailboxIds || {}; });
 
+    // Build patch per email: remove all current mailboxes, add target
     const updates: Record<string, any> = {};
     emailIds.forEach(id => {
-      updates[id] = { mailboxIds: targetMailboxIds };
+      const patch: Record<string, boolean | null> = {};
+      for (const mbId of Object.keys(mailboxMap[id] || {})) {
+        patch[`mailboxIds/${mbId}`] = null;
+      }
+      patch[`mailboxIds/${targetMailboxId}`] = true;
+      updates[id] = patch;
     });
 
     const request: JmapRequest = {
@@ -718,7 +755,7 @@ export class JmapClient {
 
     const response = await this.makeRequest(request);
     const result = response.methodResponses[0][1];
-    
+
     if (result.notUpdated && Object.keys(result.notUpdated).length > 0) {
       throw new Error('Failed to move some emails.');
     }
