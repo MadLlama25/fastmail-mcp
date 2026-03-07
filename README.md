@@ -9,6 +9,8 @@ A Model Context Protocol (MCP) server that provides access to the Fastmail API, 
 - List, search, and filter emails with advanced criteria
 - Get specific emails by ID with full content
 - Send emails (text and HTML) with proper draft/sent handling
+- Reply to emails with proper threading (In-Reply-To, References headers)
+- Create and save email drafts (with or without threading)
 - Email management: mark read/unread, delete, move between folders
 
 ### Advanced Email Features
@@ -128,7 +130,7 @@ You can install this server as a Desktop Extension for Claude Desktop using the 
 
 3. Use any of the tools (e.g. `get_recent_emails`).
 
-## Available Tools (35 Total)
+## Available Tools (38 Total)
 
 **🎯 Most Popular Tools:**
 - **check_function_availability**: Check what's available and get setup guidance  
@@ -144,8 +146,14 @@ You can install this server as a Desktop Extension for Claude Desktop using the 
   - Parameters: `mailboxId` (optional), `limit` (default: 20)
 - **get_email**: Get a specific email by ID
   - Parameters: `emailId` (required)
-- **send_email**: Send an email
-  - Parameters: `to` (required array), `cc` (optional array), `bcc` (optional array), `from` (optional), `mailboxId` (optional), `subject` (required), `textBody` (optional), `htmlBody` (optional)
+- **send_email**: Send an email (supports threading via optional `inReplyTo` and `references` headers)
+  - Parameters: `to` (required array), `cc` (optional array), `bcc` (optional array), `from` (optional), `mailboxId` (optional), `subject` (required), `textBody` (optional), `htmlBody` (optional), `inReplyTo` (optional array), `references` (optional array)
+- **reply_email**: Reply to an existing email with proper threading headers (automatically builds In-Reply-To and References)
+  - Parameters: `originalEmailId` (required), `to` (optional array, defaults to original sender), `cc` (optional array), `bcc` (optional array), `from` (optional), `textBody` (optional), `htmlBody` (optional)
+- **save_draft**: Save an email as a draft without sending (supports threading headers for reply drafts)
+  - Parameters: `to` (required array), `cc` (optional array), `bcc` (optional array), `from` (optional), `subject` (required), `textBody` (optional), `htmlBody` (optional), `inReplyTo` (optional array), `references` (optional array)
+- **create_draft**: Create a minimal email draft (at least one of to/subject/body required)
+  - Parameters: `to` (optional array), `cc` (optional array), `bcc` (optional array), `from` (optional), `mailboxId` (optional), `subject` (optional), `textBody` (optional), `htmlBody` (optional)
 - **search_emails**: Search emails by content
   - Parameters: `query` (required), `limit` (default: 20)
 - **get_recent_emails**: Get the most recent emails from a mailbox (inspired by JMAP-Samples top-ten)
