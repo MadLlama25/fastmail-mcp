@@ -1,4 +1,6 @@
 import { FastmailAuth } from './auth.js';
+import { writeFile, mkdir } from 'fs/promises';
+import { dirname } from 'path';
 
 export interface JmapSession {
   apiUrl: string;
@@ -128,7 +130,7 @@ export class JmapClient {
         ['Email/get', {
           accountId: session.accountId,
           ids: [id],
-          properties: ['id', 'subject', 'from', 'to', 'cc', 'bcc', 'receivedAt', 'textBody', 'htmlBody', 'attachments', 'bodyValues'],
+          properties: ['id', 'subject', 'from', 'to', 'cc', 'bcc', 'receivedAt', 'textBody', 'htmlBody', 'attachments', 'bodyValues', 'messageId', 'threadId', 'inReplyTo', 'references'],
           bodyProperties: ['partId', 'blobId', 'type', 'size'],
           fetchTextBodyValues: true,
           fetchHTMLBodyValues: true,
@@ -183,6 +185,8 @@ export class JmapClient {
     htmlBody?: string;
     from?: string;
     mailboxId?: string;
+    inReplyTo?: string[];
+    references?: string[];
   }): Promise<string> {
     const session = await this.getSession();
 
@@ -243,6 +247,8 @@ export class JmapClient {
       cc: email.cc?.map(addr => ({ email: addr })) || [],
       bcc: email.bcc?.map(addr => ({ email: addr })) || [],
       subject: email.subject,
+      ...(email.inReplyTo && { inReplyTo: email.inReplyTo }),
+      ...(email.references && { references: email.references }),
       textBody: email.textBody ? [{ partId: 'text', type: 'text/plain' }] : undefined,
       htmlBody: email.htmlBody ? [{ partId: 'html', type: 'text/html' }] : undefined,
       bodyValues: {
@@ -295,6 +301,95 @@ export class JmapClient {
     }
     
     return submissionResult.created?.submission?.id || 'unknown';
+  }
+
+  async saveDraft(email: {
+    to: string[];
+    cc?: string[];
+    bcc?: string[];
+    subject: string;
+    textBody?: string;
+    htmlBody?: string;
+    from?: string;
+    inReplyTo?: string[];
+    references?: string[];
+  }): Promise<string> {
+    const session = await this.getSession();
+
+    // Get all identities to validate from address
+    const identities = await this.getIdentities();
+    if (!identities || identities.length === 0) {
+      throw new Error('No sending identities found');
+    }
+
+    // Determine which identity to use
+    let selectedIdentity;
+    if (email.from) {
+      selectedIdentity = identities.find(id => 
+        id.email.toLowerCase() === email.from?.toLowerCase()
+      );
+      if (!selectedIdentity) {
+        throw new Error('From address is not verified for sending. Choose one of your verified identities.');
+      }
+    } else {
+      selectedIdentity = identities.find(id => id.mayDelete === false) || identities[0];
+    }
+
+    const fromEmail = selectedIdentity.email;
+
+    // Get the Drafts mailbox
+    const mailboxes = await this.getMailboxes();
+    const draftsMailbox = mailboxes.find(mb => mb.role === 'drafts') || mailboxes.find(mb => mb.name.toLowerCase().includes('draft'));
+    
+    if (!draftsMailbox) {
+      throw new Error('Could not find Drafts mailbox');
+    }
+
+    // Ensure we have at least one body type
+    if (!email.textBody && !email.htmlBody) {
+      throw new Error('Either textBody or htmlBody must be provided');
+    }
+
+    const mailboxIds: Record<string, boolean> = {};
+    mailboxIds[draftsMailbox.id] = true;
+
+    const emailObject: any = {
+      mailboxIds,
+      keywords: { $draft: true },
+      from: [{ email: fromEmail }],
+      to: email.to.map(addr => ({ email: addr })),
+      cc: email.cc?.map(addr => ({ email: addr })) || [],
+      bcc: email.bcc?.map(addr => ({ email: addr })) || [],
+      subject: email.subject,
+      ...(email.inReplyTo && { inReplyTo: email.inReplyTo }),
+      ...(email.references && { references: email.references }),
+      textBody: email.textBody ? [{ partId: 'text', type: 'text/plain' }] : undefined,
+      htmlBody: email.htmlBody ? [{ partId: 'html', type: 'text/html' }] : undefined,
+      bodyValues: {
+        ...(email.textBody && { text: { value: email.textBody } }),
+        ...(email.htmlBody && { html: { value: email.htmlBody } })
+      }
+    };
+
+    const request: JmapRequest = {
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
+      methodCalls: [
+        ['Email/set', {
+          accountId: session.accountId,
+          create: { draft: emailObject }
+        }, 'createDraft']
+      ]
+    };
+
+    const response = await this.makeRequest(request);
+    
+    // Check if draft creation was successful
+    const draftResult = response.methodResponses[0][1];
+    if (draftResult.notCreated && draftResult.notCreated.draft) {
+      throw new Error('Failed to create draft. Please check inputs and try again.');
+    }
+    
+    return draftResult.created?.draft?.id || 'unknown';
   }
 
   async getRecentEmails(limit: number = 10, mailboxName: string = 'inbox'): Promise<any[]> {
@@ -441,6 +536,128 @@ export class JmapClient {
     }
   }
 
+  async addLabels(emailId: string, mailboxIds: string[]): Promise<void> {
+    const session = await this.getSession();
+
+    // Build patch object to add specific mailboxIds
+    const patch: Record<string, any> = {};
+    mailboxIds.forEach(mailboxId => {
+      patch[`mailboxIds/${mailboxId}`] = true;
+    });
+
+    const request: JmapRequest = {
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
+      methodCalls: [
+        ['Email/set', {
+          accountId: session.accountId,
+          update: {
+            [emailId]: patch
+          }
+        }, 'addLabels']
+      ]
+    };
+
+    const response = await this.makeRequest(request);
+    const result = response.methodResponses[0][1];
+
+    if (result.notUpdated && result.notUpdated[emailId]) {
+      throw new Error('Failed to add labels to email.');
+    }
+  }
+
+  async removeLabels(emailId: string, mailboxIds: string[]): Promise<void> {
+    const session = await this.getSession();
+
+    // Build patch object to remove specific mailboxIds
+    const patch: Record<string, any> = {};
+    mailboxIds.forEach(mailboxId => {
+      patch[`mailboxIds/${mailboxId}`] = null;
+    });
+
+    const request: JmapRequest = {
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
+      methodCalls: [
+        ['Email/set', {
+          accountId: session.accountId,
+          update: {
+            [emailId]: patch
+          }
+        }, 'removeLabels']
+      ]
+    };
+
+    const response = await this.makeRequest(request);
+    const result = response.methodResponses[0][1];
+
+    if (result.notUpdated && result.notUpdated[emailId]) {
+      throw new Error('Failed to remove labels from email.');
+    }
+  }
+
+  async bulkAddLabels(emailIds: string[], mailboxIds: string[]): Promise<void> {
+    const session = await this.getSession();
+
+    // Build patch object to add specific mailboxIds
+    const patch: Record<string, any> = {};
+    mailboxIds.forEach(mailboxId => {
+      patch[`mailboxIds/${mailboxId}`] = true;
+    });
+
+    const updates: Record<string, any> = {};
+    emailIds.forEach(id => {
+      updates[id] = patch;
+    });
+
+    const request: JmapRequest = {
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
+      methodCalls: [
+        ['Email/set', {
+          accountId: session.accountId,
+          update: updates
+        }, 'bulkAddLabels']
+      ]
+    };
+
+    const response = await this.makeRequest(request);
+    const result = response.methodResponses[0][1];
+
+    if (result.notUpdated && Object.keys(result.notUpdated).length > 0) {
+      throw new Error('Failed to add labels to some emails.');
+    }
+  }
+
+  async bulkRemoveLabels(emailIds: string[], mailboxIds: string[]): Promise<void> {
+    const session = await this.getSession();
+
+    // Build patch object to remove specific mailboxIds
+    const patch: Record<string, any> = {};
+    mailboxIds.forEach(mailboxId => {
+      patch[`mailboxIds/${mailboxId}`] = null;
+    });
+
+    const updates: Record<string, any> = {};
+    emailIds.forEach(id => {
+      updates[id] = patch;
+    });
+
+    const request: JmapRequest = {
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
+      methodCalls: [
+        ['Email/set', {
+          accountId: session.accountId,
+          update: updates
+        }, 'bulkRemoveLabels']
+      ]
+    };
+
+    const response = await this.makeRequest(request);
+    const result = response.methodResponses[0][1];
+
+    if (result.notUpdated && Object.keys(result.notUpdated).length > 0) {
+      throw new Error('Failed to remove labels from some emails.');
+    }
+  }
+
   async getEmailAttachments(emailId: string): Promise<any[]> {
     const session = await this.getSession();
 
@@ -512,6 +729,25 @@ export class JmapClient {
       .replace('{name}', encodeURIComponent(attachment.name || 'attachment'));
 
     return url;
+  }
+
+  async downloadAttachmentToFile(emailId: string, attachmentId: string, savePath: string): Promise<{ url: string; bytesWritten: number }> {
+    const url = await this.downloadAttachment(emailId, attachmentId);
+
+    const response = await fetch(url, {
+      headers: { 'Authorization': this.auth.getAuthHeaders()['Authorization'] }
+    });
+
+    if (!response.ok) {
+      throw new Error(`Download failed: ${response.status} ${response.statusText}`);
+    }
+
+    const buffer = Buffer.from(await response.arrayBuffer());
+
+    await mkdir(dirname(savePath), { recursive: true });
+    await writeFile(savePath, buffer);
+
+    return { url, bytesWritten: buffer.length };
   }
 
   async advancedSearch(filters: {
@@ -763,11 +999,11 @@ export class JmapClient {
 
   async bulkDelete(emailIds: string[]): Promise<void> {
     const session = await this.getSession();
-    
+
     // Find the trash mailbox
     const mailboxes = await this.getMailboxes();
     const trashMailbox = mailboxes.find(mb => mb.role === 'trash') || mailboxes.find(mb => mb.name.toLowerCase().includes('trash'));
-    
+
     if (!trashMailbox) {
       throw new Error('Could not find Trash mailbox');
     }
@@ -792,7 +1028,7 @@ export class JmapClient {
 
     const response = await this.makeRequest(request);
     const result = response.methodResponses[0][1];
-    
+
     if (result.notUpdated && Object.keys(result.notUpdated).length > 0) {
       throw new Error('Failed to delete some emails.');
     }

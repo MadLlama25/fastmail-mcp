@@ -28,6 +28,10 @@ A Model Context Protocol (MCP) server that provides access to the Fastmail API, 
 - Get specific calendar events by ID
 - Create new calendar events with participants and details
 
+### Label vs Move Operations
+- **move_email/bulk_move**: Replaces ALL mailboxes for an email (folder behavior)
+- **add_labels/remove_labels**: Adds/removes SPECIFIC mailboxes while preserving others (label behavior)
+
 ### Identity & Account Management
 - List available sending identities
 - Account summary with comprehensive statistics
@@ -124,7 +128,7 @@ You can install this server as a Desktop Extension for Claude Desktop using the 
 
 3. Use any of the tools (e.g. `get_recent_emails`).
 
-## Available Tools (31 Total)
+## Available Tools (35 Total)
 
 **🎯 Most Popular Tools:**
 - **check_function_availability**: Check what's available and get setup guidance  
@@ -150,15 +154,19 @@ You can install this server as a Desktop Extension for Claude Desktop using the 
   - Parameters: `emailId` (required), `read` (default: true)
 - **delete_email**: Delete an email (move to trash)
   - Parameters: `emailId` (required)
-- **move_email**: Move an email to a different mailbox
+- **move_email**: Move an email to a different mailbox (replaces all mailboxes)
   - Parameters: `emailId` (required), `targetMailboxId` (required)
+- **add_labels**: Add labels (mailboxes) to an email without removing existing ones
+  - Parameters: `emailId` (required), `mailboxIds` (required array)
+- **remove_labels**: Remove specific labels (mailboxes) from an email
+  - Parameters: `emailId` (required), `mailboxIds` (required array)
 
 ### Advanced Email Features
 
 - **get_email_attachments**: Get list of attachments for an email
   - Parameters: `emailId` (required)
-- **download_attachment**: Get download URL for an email attachment
-  - Parameters: `emailId` (required), `attachmentId` (required)
+- **download_attachment**: Download an email attachment. If savePath is provided, saves the file to disk and returns the file path and size. Otherwise returns a download URL.
+  - Parameters: `emailId` (required), `attachmentId` (required), `savePath` (optional)
 - **advanced_search**: Advanced email search with multiple criteria
   - Parameters: `query` (optional), `from` (optional), `to` (optional), `subject` (optional), `hasAttachment` (optional), `isUnread` (optional), `mailboxId` (optional), `after` (optional), `before` (optional), `limit` (default: 50)
 - **get_thread**: Get all emails in a conversation thread
@@ -178,6 +186,10 @@ You can install this server as a Desktop Extension for Claude Desktop using the 
   - Parameters: `emailIds` (required array), `targetMailboxId` (required)
 - **bulk_delete**: Delete multiple emails (move to trash)
   - Parameters: `emailIds` (required array)
+- **bulk_add_labels**: Add labels to multiple emails simultaneously
+  - Parameters: `emailIds` (required array), `mailboxIds` (required array)
+- **bulk_remove_labels**: Remove labels from multiple emails simultaneously
+  - Parameters: `emailIds` (required array), `mailboxIds` (required array)
 
 ### Contact Tools
 

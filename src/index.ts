@@ -14,7 +14,7 @@ import { ContactsCalendarClient } from './contacts-calendar.js';
 const server = new Server(
   {
     name: 'fastmail-mcp',
-    version: '1.6.1',
+    version: '1.7.0',
   },
   {
     capabilities: {
@@ -215,6 +215,108 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             htmlBody: {
               type: 'string',
               description: 'HTML body (optional)',
+            },
+            inReplyTo: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Message-ID(s) of the email being replied to (optional, for threading)',
+            },
+            references: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Full reference chain of Message-IDs (optional, for threading)',
+            },
+          },
+          required: ['to', 'subject'],
+        },
+      },
+      {
+        name: 'reply_email',
+        description: 'Reply to an existing email with proper threading headers (In-Reply-To, References). Automatically fetches the original email to build the reply chain.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            originalEmailId: {
+              type: 'string',
+              description: 'ID of the email to reply to',
+            },
+            to: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Recipient email addresses (optional, defaults to the original sender)',
+            },
+            cc: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'CC email addresses (optional)',
+            },
+            bcc: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'BCC email addresses (optional)',
+            },
+            from: {
+              type: 'string',
+              description: 'Sender email address (optional, defaults to account primary email)',
+            },
+            textBody: {
+              type: 'string',
+              description: 'Plain text body (optional)',
+            },
+            htmlBody: {
+              type: 'string',
+              description: 'HTML body (optional)',
+            },
+          },
+          required: ['originalEmailId'],
+        },
+      },
+      {
+        name: 'save_draft',
+        description: 'Save an email as a draft without sending it. Supports threading headers for replies.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            to: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Recipient email addresses',
+            },
+            cc: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'CC email addresses (optional)',
+            },
+            bcc: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'BCC email addresses (optional)',
+            },
+            from: {
+              type: 'string',
+              description: 'Sender email address (optional, defaults to account primary email)',
+            },
+            subject: {
+              type: 'string',
+              description: 'Email subject',
+            },
+            textBody: {
+              type: 'string',
+              description: 'Plain text body (optional)',
+            },
+            htmlBody: {
+              type: 'string',
+              description: 'HTML body (optional)',
+            },
+            inReplyTo: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Message-IDs to reply to (optional, for threading)',
+            },
+            references: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Message-IDs for References header (optional, for threading)',
             },
           },
           required: ['to', 'subject'],
@@ -450,6 +552,44 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: 'add_labels',
+        description: 'Add labels (mailboxes) to an email without removing existing ones',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            emailId: {
+              type: 'string',
+              description: 'ID of the email to add labels to',
+            },
+            mailboxIds: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Array of mailbox IDs to add as labels',
+            },
+          },
+          required: ['emailId', 'mailboxIds'],
+        },
+      },
+      {
+        name: 'remove_labels',
+        description: 'Remove specific labels (mailboxes) from an email',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            emailId: {
+              type: 'string',
+              description: 'ID of the email to remove labels from',
+            },
+            mailboxIds: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Array of mailbox IDs to remove as labels',
+            },
+          },
+          required: ['emailId', 'mailboxIds'],
+        },
+      },
+      {
         name: 'get_email_attachments',
         description: 'Get list of attachments for an email',
         inputSchema: {
@@ -465,7 +605,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'download_attachment',
-        description: 'Download an email attachment',
+        description: 'Download an email attachment. If savePath is provided, saves the file to disk and returns the file path and size. Otherwise returns a download URL.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -476,6 +616,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             attachmentId: {
               type: 'string',
               description: 'ID of the attachment',
+            },
+            savePath: {
+              type: 'string',
+              description: 'Absolute file path to save the attachment to. Parent directories will be created automatically.',
             },
           },
           required: ['emailId', 'attachmentId'],
@@ -621,6 +765,46 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: 'bulk_add_labels',
+        description: 'Add labels to multiple emails simultaneously',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            emailIds: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Array of email IDs to add labels to',
+            },
+            mailboxIds: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Array of mailbox IDs to add as labels',
+            },
+          },
+          required: ['emailIds', 'mailboxIds'],
+        },
+      },
+      {
+        name: 'bulk_remove_labels',
+        description: 'Remove labels from multiple emails simultaneously',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            emailIds: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Array of email IDs to remove labels from',
+            },
+            mailboxIds: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Array of mailbox IDs to remove as labels',
+            },
+          },
+          required: ['emailIds', 'mailboxIds'],
+        },
+      },
+      {
         name: 'check_function_availability',
         description: 'Check which MCP functions are available based on account permissions',
         inputSchema: {
@@ -701,7 +885,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'send_email': {
-        const { to, cc, bcc, from, mailboxId, subject, textBody, htmlBody } = args as any;
+        const { to, cc, bcc, from, mailboxId, subject, textBody, htmlBody, inReplyTo, references } = args as any;
         if (!to || !Array.isArray(to) || to.length === 0) {
           throw new McpError(ErrorCode.InvalidParams, 'to field is required and must be a non-empty array');
         }
@@ -721,6 +905,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           subject,
           textBody,
           htmlBody,
+          inReplyTo,
+          references,
         });
 
         return {
@@ -728,6 +914,101 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             {
               type: 'text',
               text: `Email sent successfully. Submission ID: ${submissionId}`,
+            },
+          ],
+        };
+      }
+
+      case 'reply_email': {
+        const { originalEmailId, to, cc, bcc, from, textBody, htmlBody } = args as any;
+        if (!originalEmailId) {
+          throw new McpError(ErrorCode.InvalidParams, 'originalEmailId is required');
+        }
+        if (!textBody && !htmlBody) {
+          throw new McpError(ErrorCode.InvalidParams, 'Either textBody or htmlBody is required');
+        }
+
+        // Fetch the original email to get threading headers
+        const originalEmail = await client.getEmailById(originalEmailId);
+
+        // Build threading headers
+        const originalMessageId = originalEmail.messageId?.[0];
+        if (!originalMessageId) {
+          throw new McpError(ErrorCode.InternalError, 'Original email does not have a Message-ID; cannot thread reply');
+        }
+
+        const inReplyToHeader = [originalMessageId];
+        const referencesHeader = [
+          ...(originalEmail.references || []),
+          originalMessageId,
+        ];
+
+        // Build subject with Re: prefix
+        let replySubject = originalEmail.subject || '';
+        if (!/^Re:/i.test(replySubject)) {
+          replySubject = `Re: ${replySubject}`;
+        }
+
+        // Default recipients to the original sender
+        const replyTo = (to && Array.isArray(to) && to.length > 0)
+          ? to
+          : originalEmail.from?.map((addr: any) => addr.email).filter(Boolean) || [];
+
+        if (replyTo.length === 0) {
+          throw new McpError(ErrorCode.InvalidParams, 'Could not determine reply recipient. Please provide "to" explicitly.');
+        }
+
+        const submissionId = await client.sendEmail({
+          to: replyTo,
+          cc,
+          bcc,
+          from,
+          subject: replySubject,
+          textBody,
+          htmlBody,
+          inReplyTo: inReplyToHeader,
+          references: referencesHeader,
+        });
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Reply sent successfully. Submission ID: ${submissionId}`,
+            },
+          ],
+        };
+      }
+
+      case 'save_draft': {
+        const { to, cc, bcc, from, subject, textBody, htmlBody, inReplyTo, references } = args as any;
+        if (!to || !Array.isArray(to) || to.length === 0) {
+          throw new McpError(ErrorCode.InvalidParams, 'to field is required and must be a non-empty array');
+        }
+        if (!subject) {
+          throw new McpError(ErrorCode.InvalidParams, 'subject is required');
+        }
+        if (!textBody && !htmlBody) {
+          throw new McpError(ErrorCode.InvalidParams, 'Either textBody or htmlBody is required');
+        }
+
+        const draftId = await client.saveDraft({
+          to,
+          cc,
+          bcc,
+          from,
+          subject,
+          textBody,
+          htmlBody,
+          inReplyTo,
+          references,
+        });
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Draft saved successfully. Draft ID: ${draftId}`,
             },
           ],
         };
@@ -967,6 +1248,46 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
+      case 'add_labels': {
+        const { emailId, mailboxIds } = args as any;
+        if (!emailId) {
+          throw new McpError(ErrorCode.InvalidParams, 'emailId is required');
+        }
+        if (!mailboxIds || !Array.isArray(mailboxIds) || mailboxIds.length === 0) {
+          throw new McpError(ErrorCode.InvalidParams, 'mailboxIds array is required and must not be empty');
+        }
+        const client = initializeClient();
+        await client.addLabels(emailId, mailboxIds);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Labels added successfully to email`,
+            },
+          ],
+        };
+      }
+
+      case 'remove_labels': {
+        const { emailId, mailboxIds } = args as any;
+        if (!emailId) {
+          throw new McpError(ErrorCode.InvalidParams, 'emailId is required');
+        }
+        if (!mailboxIds || !Array.isArray(mailboxIds) || mailboxIds.length === 0) {
+          throw new McpError(ErrorCode.InvalidParams, 'mailboxIds array is required and must not be empty');
+        }
+        const client = initializeClient();
+        await client.removeLabels(emailId, mailboxIds);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Labels removed successfully from email`,
+            },
+          ],
+        };
+      }
+
       case 'get_email_attachments': {
         const { emailId } = args as any;
         if (!emailId) {
@@ -985,21 +1306,33 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'download_attachment': {
-        const { emailId, attachmentId } = args as any;
+        const { emailId, attachmentId, savePath } = args as any;
         if (!emailId || !attachmentId) {
           throw new McpError(ErrorCode.InvalidParams, 'emailId and attachmentId are required');
         }
         const client = initializeClient();
         try {
-          const downloadUrl = await client.downloadAttachment(emailId, attachmentId);
-          return {
-            content: [
-              {
-                type: 'text',
-                text: `Download URL: ${downloadUrl}`,
-              },
-            ],
-          };
+          if (savePath) {
+            const result = await client.downloadAttachmentToFile(emailId, attachmentId, savePath);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: `Saved to: ${savePath} (${result.bytesWritten} bytes)`,
+                },
+              ],
+            };
+          } else {
+            const downloadUrl = await client.downloadAttachment(emailId, attachmentId);
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: `Download URL: ${downloadUrl}`,
+                },
+              ],
+            };
+          }
         } catch (error) {
           // Sanitize error to avoid leaking attachment metadata
           throw new McpError(
@@ -1128,6 +1461,46 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
+      case 'bulk_add_labels': {
+        const { emailIds, mailboxIds } = args as any;
+        if (!emailIds || !Array.isArray(emailIds) || emailIds.length === 0) {
+          throw new McpError(ErrorCode.InvalidParams, 'emailIds array is required and must not be empty');
+        }
+        if (!mailboxIds || !Array.isArray(mailboxIds) || mailboxIds.length === 0) {
+          throw new McpError(ErrorCode.InvalidParams, 'mailboxIds array is required and must not be empty');
+        }
+        const client = initializeClient();
+        await client.bulkAddLabels(emailIds, mailboxIds);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Labels added successfully to ${emailIds.length} emails`,
+            },
+          ],
+        };
+      }
+
+      case 'bulk_remove_labels': {
+        const { emailIds, mailboxIds } = args as any;
+        if (!emailIds || !Array.isArray(emailIds) || emailIds.length === 0) {
+          throw new McpError(ErrorCode.InvalidParams, 'emailIds array is required and must not be empty');
+        }
+        if (!mailboxIds || !Array.isArray(mailboxIds) || mailboxIds.length === 0) {
+          throw new McpError(ErrorCode.InvalidParams, 'mailboxIds array is required and must not be empty');
+        }
+        const client = initializeClient();
+        await client.bulkRemoveLabels(emailIds, mailboxIds);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Labels removed successfully from ${emailIds.length} emails`,
+            },
+          ],
+        };
+      }
+
       case 'check_function_availability': {
         const client = initializeClient();
         const session = await client.getSession();
@@ -1139,7 +1512,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               'list_mailboxes', 'list_emails', 'get_email', 'send_email', 'search_emails',
               'get_recent_emails', 'mark_email_read', 'delete_email', 'move_email',
               'get_email_attachments', 'download_attachment', 'advanced_search', 'get_thread',
-              'get_mailbox_stats', 'get_account_summary', 'bulk_mark_read', 'bulk_move', 'bulk_delete'
+              'get_mailbox_stats', 'get_account_summary', 'bulk_mark_read', 'bulk_move', 'bulk_delete',
+              'add_labels', 'remove_labels', 'bulk_add_labels', 'bulk_remove_labels'
             ]
           },
           identity: {
