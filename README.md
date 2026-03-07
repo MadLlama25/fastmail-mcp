@@ -112,7 +112,7 @@ You can install this server as a Desktop Extension for Claude Desktop using the 
 1. Build and pack:
    ```bash
    npm run build
-   npx dxt pack
+   npx @anthropic-ai/dxt pack
    ```
    This produces `fastmail-mcp.dxt` in the project root.
 
