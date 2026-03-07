@@ -28,6 +28,25 @@ export class JmapClient {
     this.auth = auth;
   }
 
+  /**
+   * Extract the result from a JMAP method response, throwing on method-level errors.
+   */
+  protected getMethodResult(response: JmapResponse, index: number): any {
+    const [tag, result] = response.methodResponses[index];
+    if (tag === 'error') {
+      throw new Error(`JMAP error: ${result.type}${result.description ? ' - ' + result.description : ''}`);
+    }
+    return result;
+  }
+
+  /**
+   * Extract the .list array from a JMAP method response, with null safety.
+   */
+  protected getListResult(response: JmapResponse, index: number): any[] {
+    const result = this.getMethodResult(response, index);
+    return result?.list || [];
+  }
+
   async getSession(): Promise<JmapSession> {
     if (this.session) {
       return this.session;
@@ -94,7 +113,7 @@ export class JmapClient {
     };
 
     const response = await this.makeRequest(request);
-    return response.methodResponses[0][1].list;
+    return this.getListResult(response, 0);
   }
 
   async getEmails(mailboxId?: string, limit: number = 20): Promise<any[]> {
@@ -120,7 +139,7 @@ export class JmapClient {
     };
 
     const response = await this.makeRequest(request);
-    return response.methodResponses[1][1].list;
+    return this.getListResult(response, 1);
   }
 
   async getEmailById(id: string): Promise<any> {
@@ -141,13 +160,13 @@ export class JmapClient {
     };
 
     const response = await this.makeRequest(request);
-    const result = response.methodResponses[0][1];
-    
+    const result = this.getMethodResult(response, 0);
+
     if (result.notFound && result.notFound.includes(id)) {
       throw new Error(`Email with ID '${id}' not found`);
     }
-    
-    const email = result.list[0];
+
+    const email = result.list?.[0];
     if (!email) {
       throw new Error(`Email with ID '${id}' not found or not accessible`);
     }
@@ -168,7 +187,7 @@ export class JmapClient {
     };
 
     const response = await this.makeRequest(request);
-    return response.methodResponses[0][1].list;
+    return this.getListResult(response, 0);
   }
 
   async getDefaultIdentity(): Promise<any> {
@@ -513,14 +532,20 @@ export class JmapClient {
     };
 
     const response = await this.makeRequest(request);
-    
+
     // Check if draft creation was successful
-    const draftResult = response.methodResponses[0][1];
-    if (draftResult.notCreated && draftResult.notCreated.draft) {
-      throw new Error('Failed to create draft. Please check inputs and try again.');
+    const draftResult = this.getMethodResult(response, 0);
+    if (draftResult.notCreated?.draft) {
+      const err = draftResult.notCreated.draft;
+      throw new Error(`Failed to create draft: ${err.type}${err.description ? ' - ' + err.description : ''}`);
     }
-    
-    return draftResult.created?.draft?.id || 'unknown';
+
+    const draftId = draftResult.created?.draft?.id;
+    if (!draftId) {
+      throw new Error('Draft creation returned no email ID');
+    }
+
+    return draftId;
   }
 
   async getRecentEmails(limit: number = 10, mailboxName: string = 'inbox'): Promise<any[]> {
@@ -555,7 +580,7 @@ export class JmapClient {
     };
 
     const response = await this.makeRequest(request);
-    return response.methodResponses[1][1].list;
+    return this.getListResult(response, 1);
   }
 
   async markEmailRead(emailId: string, read: boolean = true): Promise<void> {
@@ -636,7 +661,7 @@ export class JmapClient {
       ]
     };
     const getResponse = await this.makeRequest(getRequest);
-    const email = getResponse.methodResponses[0][1].list[0];
+    const email = this.getListResult(getResponse, 0)[0];
 
     // Build patch: remove from all current mailboxes, add to target
     const patch: Record<string, boolean | null> = {};
@@ -804,7 +829,7 @@ export class JmapClient {
     };
 
     const response = await this.makeRequest(request);
-    const email = response.methodResponses[0][1].list[0];
+    const email = this.getListResult(response, 0)[0];
     return email?.attachments || [];
   }
 
@@ -825,8 +850,8 @@ export class JmapClient {
     };
 
     const response = await this.makeRequest(request);
-    const email = response.methodResponses[0][1].list[0];
-    
+    const email = this.getListResult(response, 0)[0];
+
     if (!email) {
       throw new Error('Email not found');
     }
@@ -932,7 +957,7 @@ export class JmapClient {
     };
 
     const response = await this.makeRequest(request);
-    return response.methodResponses[1][1].list;
+    return this.getListResult(response, 1);
   }
 
   async getThread(threadId: string): Promise<any[]> {
@@ -955,8 +980,8 @@ export class JmapClient {
       };
       
       const emailResponse = await this.makeRequest(emailRequest);
-      const email = emailResponse.methodResponses[0][1].list[0];
-      
+      const email = this.getListResult(emailResponse, 0)[0];
+
       if (email && email.threadId) {
         actualThreadId = email.threadId;
       }
@@ -981,14 +1006,14 @@ export class JmapClient {
     };
 
     const response = await this.makeRequest(request);
-    const threadResult = response.methodResponses[0][1];
-    
+    const threadResult = this.getMethodResult(response, 0);
+
     // Check if thread was found
     if (threadResult.notFound && threadResult.notFound.includes(actualThreadId)) {
       throw new Error(`Thread with ID '${actualThreadId}' not found`);
     }
-    
-    return response.methodResponses[1][1].list;
+
+    return this.getListResult(response, 1);
   }
 
   async getMailboxStats(mailboxId?: string): Promise<any> {
@@ -1008,7 +1033,7 @@ export class JmapClient {
       };
 
       const response = await this.makeRequest(request);
-      return response.methodResponses[0][1].list[0];
+      return this.getListResult(response, 0)[0];
     } else {
       // Get stats for all mailboxes
       const mailboxes = await this.getMailboxes();
@@ -1095,7 +1120,7 @@ export class JmapClient {
       ]
     };
     const getResponse = await this.makeRequest(getRequest);
-    const emails: any[] = getResponse.methodResponses[0][1].list;
+    const emails: any[] = this.getListResult(getResponse, 0);
     const mailboxMap: Record<string, Record<string, boolean>> = {};
     emails.forEach((e: any) => { mailboxMap[e.id] = e.mailboxIds || {}; });
 

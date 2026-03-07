@@ -1112,7 +1112,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
 
         const response = await client.makeRequest(request);
-        const emails = response.methodResponses[1][1].list;
+        const emailResult = response.methodResponses[1];
+        if (emailResult[0] === 'error') {
+          throw new McpError(ErrorCode.InternalError, `JMAP error: ${emailResult[1].type}`);
+        }
+        const emails = emailResult[1].list || [];
 
         return {
           content: [

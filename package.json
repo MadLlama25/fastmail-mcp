@@ -17,11 +17,16 @@
   "engines": {
     "node": ">=18"
   },
-  "keywords": ["mcp", "fastmail", "email", "jmap"],
+  "keywords": [
+    "mcp",
+    "fastmail",
+    "email",
+    "jmap"
+  ],
   "author": "Jeremy Gill",
   "license": "MIT",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^0.6.0"
+    "@modelcontextprotocol/sdk": "^1.27.1"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
