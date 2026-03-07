@@ -1,7 +1,7 @@
 {
   "dxt_version": "0.1",
   "name": "fastmail-mcp",
-  "version": "1.6.1",
+  "version": "1.7.0",
   "description": "MCP server for Fastmail API integration",
   "author": {
     "name": "Jeremy Gill"
