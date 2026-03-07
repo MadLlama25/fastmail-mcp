@@ -323,6 +323,50 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: 'create_draft',
+        description: 'Create an email draft without sending it',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            to: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Recipient email addresses (optional)',
+            },
+            cc: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'CC email addresses (optional)',
+            },
+            bcc: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'BCC email addresses (optional)',
+            },
+            from: {
+              type: 'string',
+              description: 'Sender email address (optional, defaults to account primary email)',
+            },
+            mailboxId: {
+              type: 'string',
+              description: 'Mailbox ID to save the draft to (optional, defaults to Drafts folder)',
+            },
+            subject: {
+              type: 'string',
+              description: 'Email subject (optional)',
+            },
+            textBody: {
+              type: 'string',
+              description: 'Plain text body (optional)',
+            },
+            htmlBody: {
+              type: 'string',
+              description: 'HTML body (optional)',
+            },
+          },
+        },
+      },
+      {
         name: 'search_emails',
         description: 'Search emails by subject or content',
         inputSchema: {
@@ -1014,6 +1058,34 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
+      case 'create_draft': {
+        const { to, cc, bcc, from, mailboxId, subject, textBody, htmlBody } = args as any;
+
+        if (!to?.length && !subject && !textBody && !htmlBody) {
+          throw new McpError(ErrorCode.InvalidParams, 'At least one of to, subject, textBody, or htmlBody must be provided');
+        }
+
+        const emailId = await client.createDraft({
+          to,
+          cc,
+          bcc,
+          from,
+          mailboxId,
+          subject,
+          textBody,
+          htmlBody,
+        });
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Draft created successfully. Email ID: ${emailId}`,
+            },
+          ],
+        };
+      }
+
       case 'search_emails': {
         const { query, limit = 20 } = args as any;
         if (!query) {
@@ -1509,7 +1581,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           email: {
             available: true,
             functions: [
-              'list_mailboxes', 'list_emails', 'get_email', 'send_email', 'search_emails',
+              'list_mailboxes', 'list_emails', 'get_email', 'send_email', 'create_draft', 'search_emails',
               'get_recent_emails', 'mark_email_read', 'delete_email', 'move_email',
               'get_email_attachments', 'download_attachment', 'advanced_search', 'get_thread',
               'get_mailbox_stats', 'get_account_summary', 'bulk_mark_read', 'bulk_move', 'bulk_delete',

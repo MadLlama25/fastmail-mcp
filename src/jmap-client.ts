@@ -287,20 +287,149 @@ export class JmapClient {
     };
 
     const response = await this.makeRequest(request);
-    
-    // Check if email creation was successful
+
+    // Check for JMAP method-level error on Email/set
+    if (response.methodResponses[0][0] === 'error') {
+      const err = response.methodResponses[0][1];
+      throw new Error(`JMAP error creating email: ${err.type}${err.description ? ' - ' + err.description : ''}`);
+    }
+
     const emailResult = response.methodResponses[0][1];
-    if (emailResult.notCreated && emailResult.notCreated.draft) {
-      throw new Error('Failed to create email. Please check inputs and try again.');
+    if (emailResult.notCreated?.draft) {
+      const err = emailResult.notCreated.draft;
+      throw new Error(`Failed to create email: ${err.type}${err.description ? ' - ' + err.description : ''}`);
     }
-    
-    // Check if email submission was successful
+
+    const emailId = emailResult.created?.draft?.id;
+    if (!emailId) {
+      throw new Error('Email creation returned no email ID');
+    }
+
+    // Check for JMAP method-level error on EmailSubmission/set
+    if (response.methodResponses[1][0] === 'error') {
+      const err = response.methodResponses[1][1];
+      throw new Error(`JMAP error submitting email: ${err.type}${err.description ? ' - ' + err.description : ''}`);
+    }
+
     const submissionResult = response.methodResponses[1][1];
-    if (submissionResult.notCreated && submissionResult.notCreated.submission) {
-      throw new Error('Failed to submit email. Please try again later.');
+    if (submissionResult.notCreated?.submission) {
+      const err = submissionResult.notCreated.submission;
+      throw new Error(`Failed to submit email: ${err.type}${err.description ? ' - ' + err.description : ''}`);
     }
-    
-    return submissionResult.created?.submission?.id || 'unknown';
+
+    const submissionId = submissionResult.created?.submission?.id;
+    if (!submissionId) {
+      throw new Error('Email submission returned no submission ID');
+    }
+
+    return submissionId;
+  }
+
+  async createDraft(email: {
+    to?: string[];
+    cc?: string[];
+    bcc?: string[];
+    subject?: string;
+    textBody?: string;
+    htmlBody?: string;
+    from?: string;
+    mailboxId?: string;
+  }): Promise<string> {
+    const session = await this.getSession();
+
+    // Validate at least one meaningful field is present
+    if (!email.to?.length && !email.subject && !email.textBody && !email.htmlBody) {
+      throw new Error('At least one of to, subject, textBody, or htmlBody must be provided');
+    }
+
+    // Get all identities to resolve from address
+    const identities = await this.getIdentities();
+    if (!identities || identities.length === 0) {
+      throw new Error('No sending identities found');
+    }
+
+    let selectedIdentity;
+    if (email.from) {
+      selectedIdentity = identities.find(id =>
+        id.email.toLowerCase() === email.from?.toLowerCase()
+      );
+      if (!selectedIdentity) {
+        throw new Error('From address is not verified for sending. Choose one of your verified identities.');
+      }
+    } else {
+      selectedIdentity = identities.find(id => id.mayDelete === false) || identities[0];
+    }
+
+    const fromEmail = selectedIdentity.email;
+
+    // Resolve drafts mailbox
+    let draftMailboxId: string;
+    if (email.mailboxId) {
+      draftMailboxId = email.mailboxId;
+    } else {
+      const mailboxes = await this.getMailboxes();
+      const draftsMailbox = mailboxes.find(mb => mb.role === 'drafts') || mailboxes.find(mb => mb.name.toLowerCase().includes('draft'));
+      if (!draftsMailbox) {
+        throw new Error('Could not find Drafts mailbox');
+      }
+      draftMailboxId = draftsMailbox.id;
+    }
+
+    const mailboxIds: Record<string, boolean> = {};
+    mailboxIds[draftMailboxId] = true;
+
+    const emailObject: any = {
+      mailboxIds,
+      keywords: { $draft: true },
+      from: [{ email: fromEmail }],
+    };
+
+    if (email.to?.length) emailObject.to = email.to.map(addr => ({ email: addr }));
+    if (email.cc?.length) emailObject.cc = email.cc.map(addr => ({ email: addr }));
+    if (email.bcc?.length) emailObject.bcc = email.bcc.map(addr => ({ email: addr }));
+    if (email.subject) emailObject.subject = email.subject;
+    if (email.textBody) emailObject.textBody = [{ partId: 'text', type: 'text/plain' }];
+    if (email.htmlBody) emailObject.htmlBody = [{ partId: 'html', type: 'text/html' }];
+    if (email.textBody || email.htmlBody) {
+      emailObject.bodyValues = {
+        ...(email.textBody && { text: { value: email.textBody } }),
+        ...(email.htmlBody && { html: { value: email.htmlBody } })
+      };
+    }
+
+    const request: JmapRequest = {
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
+      methodCalls: [
+        ['Email/set', {
+          accountId: session.accountId,
+          create: { draft: emailObject }
+        }, 'createDraft']
+      ]
+    };
+
+    const response = await this.makeRequest(request);
+
+    // Bug 1: Check for JMAP method-level error
+    if (response.methodResponses[0][0] === 'error') {
+      const err = response.methodResponses[0][1];
+      throw new Error(`JMAP error: ${err.type}${err.description ? ' - ' + err.description : ''}`);
+    }
+
+    const result = response.methodResponses[0][1];
+
+    // Bug 2: Propagate server-provided error details from notCreated
+    if (result.notCreated?.draft) {
+      const err = result.notCreated.draft;
+      throw new Error(`Failed to create draft: ${err.type}${err.description ? ' - ' + err.description : ''}`);
+    }
+
+    // Bug 3: Throw if created ID is missing instead of returning 'unknown'
+    const emailId = result.created?.draft?.id;
+    if (!emailId) {
+      throw new Error('Draft creation returned no email ID');
+    }
+
+    return emailId;
   }
 
   async saveDraft(email: {

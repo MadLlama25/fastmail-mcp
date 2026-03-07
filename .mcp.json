@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "fastmail": {
+      "command": "node",
+      "args": ["dist/index.js"],
+      "env": {
+        "FASTMAIL_API_TOKEN": "${FASTMAIL_API_TOKEN}"
+      }
+    }
+  }
+}
