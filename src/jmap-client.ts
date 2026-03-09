@@ -1,6 +1,7 @@
 import { FastmailAuth } from './auth.js';
 import { writeFile, mkdir } from 'fs/promises';
-import { dirname } from 'path';
+import { dirname, resolve, normalize } from 'path';
+import { homedir } from 'os';
 
 export interface JmapSession {
   apiUrl: string;
@@ -882,7 +883,28 @@ export class JmapClient {
     return url;
   }
 
+  static readonly DEFAULT_DOWNLOADS_DIR = resolve(homedir(), 'Downloads', 'fastmail-mcp');
+
+  static validateSavePath(savePath: string): string {
+    const allowedDir = JmapClient.DEFAULT_DOWNLOADS_DIR;
+    const resolved = resolve(normalize(savePath));
+
+    if (!resolved.startsWith(allowedDir + '/') && resolved !== allowedDir) {
+      throw new Error(
+        `Save path must be within ${allowedDir}. ` +
+        `Received: ${savePath}`
+      );
+    }
+
+    if (resolved.includes('\0')) {
+      throw new Error('Save path contains null bytes');
+    }
+
+    return resolved;
+  }
+
   async downloadAttachmentToFile(emailId: string, attachmentId: string, savePath: string): Promise<{ url: string; bytesWritten: number }> {
+    const validatedPath = JmapClient.validateSavePath(savePath);
     const url = await this.downloadAttachment(emailId, attachmentId);
 
     const response = await fetch(url, {
@@ -895,8 +917,8 @@ export class JmapClient {
 
     const buffer = Buffer.from(await response.arrayBuffer());
 
-    await mkdir(dirname(savePath), { recursive: true });
-    await writeFile(savePath, buffer);
+    await mkdir(dirname(validatedPath), { recursive: true });
+    await writeFile(validatedPath, buffer);
 
     return { url, bytesWritten: buffer.length };
   }

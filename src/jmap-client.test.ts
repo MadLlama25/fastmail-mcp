@@ -1,5 +1,7 @@
 import { describe, it, beforeEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
+import { homedir } from 'os';
+import { resolve } from 'path';
 import { JmapClient } from './jmap-client.js';
 import { FastmailAuth } from './auth.js';
 
@@ -310,6 +312,62 @@ describe('searchEmails', () => {
       () => client.searchEmails('test'),
       (err: Error) => {
         assert.match(err.message, /invalidArguments/);
+        return true;
+      },
+    );
+  });
+});
+
+// ---------- validateSavePath tests ----------
+
+describe('validateSavePath', () => {
+  const allowedDir = resolve(homedir(), 'Downloads', 'fastmail-mcp');
+
+  it('accepts paths within the allowed directory', () => {
+    const result = JmapClient.validateSavePath(`${allowedDir}/photo.jpg`);
+    assert.equal(result, `${allowedDir}/photo.jpg`);
+  });
+
+  it('accepts paths in subdirectories', () => {
+    const result = JmapClient.validateSavePath(`${allowedDir}/andrew/assets/logo.png`);
+    assert.equal(result, `${allowedDir}/andrew/assets/logo.png`);
+  });
+
+  it('rejects paths outside the allowed directory', () => {
+    assert.throws(
+      () => JmapClient.validateSavePath('/tmp/evil.sh'),
+      (err: Error) => {
+        assert.match(err.message, /must be within/);
+        return true;
+      },
+    );
+  });
+
+  it('rejects path traversal attempts', () => {
+    assert.throws(
+      () => JmapClient.validateSavePath(`${allowedDir}/../../../.bashrc`),
+      (err: Error) => {
+        assert.match(err.message, /must be within/);
+        return true;
+      },
+    );
+  });
+
+  it('rejects home directory writes', () => {
+    assert.throws(
+      () => JmapClient.validateSavePath(`${homedir()}/.ssh/authorized_keys`),
+      (err: Error) => {
+        assert.match(err.message, /must be within/);
+        return true;
+      },
+    );
+  });
+
+  it('rejects null bytes', () => {
+    assert.throws(
+      () => JmapClient.validateSavePath(`${allowedDir}/file\0.txt`),
+      (err: Error) => {
+        assert.match(err.message, /null bytes/);
         return true;
       },
     );
