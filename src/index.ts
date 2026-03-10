@@ -367,6 +367,65 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: 'edit_draft',
+        description: 'Edit an existing draft email. Since JMAP emails are immutable, this atomically destroys the old draft and creates a new one with the updated fields. Only fields you provide will be changed; others are preserved from the original draft.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            emailId: {
+              type: 'string',
+              description: 'The ID of the draft email to edit',
+            },
+            to: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Updated recipient email addresses (optional, keeps existing if omitted)',
+            },
+            cc: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Updated CC email addresses (optional)',
+            },
+            bcc: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Updated BCC email addresses (optional)',
+            },
+            from: {
+              type: 'string',
+              description: 'Updated sender email address (optional)',
+            },
+            subject: {
+              type: 'string',
+              description: 'Updated email subject (optional)',
+            },
+            textBody: {
+              type: 'string',
+              description: 'Updated plain text body (optional)',
+            },
+            htmlBody: {
+              type: 'string',
+              description: 'Updated HTML body (optional)',
+            },
+          },
+          required: ['emailId'],
+        },
+      },
+      {
+        name: 'send_draft',
+        description: 'Send an existing draft email. The draft must have recipients (to/cc/bcc) and a from address. After sending, the email is moved to the Sent folder and the draft keyword is removed.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            emailId: {
+              type: 'string',
+              description: 'The ID of the draft email to send',
+            },
+          },
+          required: ['emailId'],
+        },
+      },
+      {
         name: 'search_emails',
         description: 'Search emails by subject or content',
         inputSchema: {
@@ -1086,6 +1145,50 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
+      case 'edit_draft': {
+        const { emailId, to, cc, bcc, from, subject, textBody, htmlBody } = args as any;
+        if (!emailId) {
+          throw new McpError(ErrorCode.InvalidParams, 'emailId is required');
+        }
+
+        const newEmailId = await client.updateDraft(emailId, {
+          to,
+          cc,
+          bcc,
+          from,
+          subject,
+          textBody,
+          htmlBody,
+        });
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Draft updated successfully. New Email ID: ${newEmailId} (old draft ${emailId} was replaced)`,
+            },
+          ],
+        };
+      }
+
+      case 'send_draft': {
+        const { emailId } = args as any;
+        if (!emailId) {
+          throw new McpError(ErrorCode.InvalidParams, 'emailId is required');
+        }
+
+        const submissionId = await client.sendDraft(emailId);
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Draft sent successfully. Submission ID: ${submissionId}`,
+            },
+          ],
+        };
+      }
+
       case 'search_emails': {
         const { query, limit = 20 } = args as any;
         if (!query) {
@@ -1585,7 +1688,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           email: {
             available: true,
             functions: [
-              'list_mailboxes', 'list_emails', 'get_email', 'send_email', 'create_draft', 'search_emails',
+              'list_mailboxes', 'list_emails', 'get_email', 'send_email', 'create_draft', 'edit_draft', 'send_draft', 'search_emails',
               'get_recent_emails', 'mark_email_read', 'delete_email', 'move_email',
               'get_email_attachments', 'download_attachment', 'advanced_search', 'get_thread',
               'get_mailbox_stats', 'get_account_summary', 'bulk_mark_read', 'bulk_move', 'bulk_delete',

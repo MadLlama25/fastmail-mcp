@@ -220,3 +220,217 @@ describe('createDraft', () => {
     assert.deepEqual(emailObj.bodyValues, { html: { value: '<p>Hello</p>' } });
   });
 });
+
+// ---------- updateDraft ----------
+
+const EXISTING_DRAFT = {
+  id: 'draft-1',
+  subject: 'Old Subject',
+  from: [{ email: 'me@example.com' }],
+  to: [{ email: 'bob@example.com' }],
+  cc: [],
+  bcc: [],
+  textBody: [{ partId: 'text', type: 'text/plain' }],
+  htmlBody: null,
+  bodyValues: { text: { value: 'Old body' } },
+  mailboxIds: { 'mb-drafts': true },
+  keywords: { $draft: true },
+};
+
+describe('updateDraft', () => {
+  let client: JmapClient;
+
+  beforeEach(() => {
+    client = makeClient();
+  });
+
+  it('returns new email ID on success', async () => {
+    const makeReq = mock.method(client, 'makeRequest', async (req: any) => {
+      // First call: Email/get to fetch existing draft
+      if (req.methodCalls[0][0] === 'Email/get') {
+        return { methodResponses: [['Email/get', { list: [EXISTING_DRAFT] }, 'getEmail']] };
+      }
+      // Second call: Email/set with create+destroy
+      return { methodResponses: [['Email/set', { created: { draft: { id: 'draft-2' } }, destroyed: ['draft-1'] }, 'updateDraft']] };
+    });
+
+    const newId = await client.updateDraft('draft-1', { subject: 'New Subject' });
+    assert.equal(newId, 'draft-2');
+
+    // Verify the second call has both create and destroy
+    const setCall = makeReq.mock.calls[1].arguments[0];
+    assert.equal(setCall.methodCalls[0][0], 'Email/set');
+    assert.deepEqual(setCall.methodCalls[0][1].destroy, ['draft-1']);
+    assert.equal(setCall.methodCalls[0][1].create.draft.subject, 'New Subject');
+  });
+
+  it('merges fields — preserves existing values for unspecified fields', async () => {
+    mock.method(client, 'makeRequest', async (req: any) => {
+      if (req.methodCalls[0][0] === 'Email/get') {
+        return { methodResponses: [['Email/get', { list: [EXISTING_DRAFT] }, 'getEmail']] };
+      }
+      return { methodResponses: [['Email/set', { created: { draft: { id: 'draft-2' } }, destroyed: ['draft-1'] }, 'updateDraft']] };
+    });
+
+    await client.updateDraft('draft-1', { subject: 'Updated' });
+
+    // The create call should keep existing to address
+    const makeReq = client.makeRequest as ReturnType<typeof mock.method>;
+    const emailObj = makeReq.mock.calls[1].arguments[0].methodCalls[0][1].create.draft;
+    assert.deepEqual(emailObj.to, [{ email: 'bob@example.com' }]);
+    assert.equal(emailObj.subject, 'Updated');
+  });
+
+  it('rejects non-draft email', async () => {
+    const nonDraft = { ...EXISTING_DRAFT, keywords: { $seen: true } };
+    mock.method(client, 'makeRequest', async () => ({
+      methodResponses: [['Email/get', { list: [nonDraft] }, 'getEmail']],
+    }));
+
+    await assert.rejects(
+      () => client.updateDraft('email-1', { subject: 'X' }),
+      (err: Error) => {
+        assert.match(err.message, /non-draft/i);
+        return true;
+      },
+    );
+  });
+
+  it('throws when email not found', async () => {
+    mock.method(client, 'makeRequest', async () => ({
+      methodResponses: [['Email/get', { list: [] }, 'getEmail']],
+    }));
+
+    await assert.rejects(
+      () => client.updateDraft('missing-id', { subject: 'X' }),
+      (err: Error) => {
+        assert.match(err.message, /not found/i);
+        return true;
+      },
+    );
+  });
+
+  it('throws on JMAP error during create+destroy', async () => {
+    mock.method(client, 'makeRequest', async (req: any) => {
+      if (req.methodCalls[0][0] === 'Email/get') {
+        return { methodResponses: [['Email/get', { list: [EXISTING_DRAFT] }, 'getEmail']] };
+      }
+      return { methodResponses: [['error', { type: 'serverFail', description: 'oops' }, 'updateDraft']] };
+    });
+
+    await assert.rejects(
+      () => client.updateDraft('draft-1', { subject: 'X' }),
+      (err: Error) => {
+        assert.match(err.message, /serverFail/);
+        return true;
+      },
+    );
+  });
+});
+
+// ---------- sendDraft ----------
+
+const SENDABLE_DRAFT = {
+  id: 'draft-1',
+  from: [{ email: 'me@example.com' }],
+  to: [{ email: 'bob@example.com' }],
+  cc: [{ email: 'cc@example.com' }],
+  bcc: [],
+  keywords: { $draft: true },
+};
+
+const SENT_MAILBOX = { id: 'mb-sent', name: 'Sent', role: 'sent' };
+
+describe('sendDraft', () => {
+  let client: JmapClient;
+
+  beforeEach(() => {
+    client = makeClient();
+    mock.method(client, 'getMailboxes', async () => [DRAFTS_MAILBOX, SENT_MAILBOX]);
+  });
+
+  it('returns submission ID on success', async () => {
+    const makeReq = mock.method(client, 'makeRequest', async (req: any) => {
+      if (req.methodCalls[0][0] === 'Email/get') {
+        return { methodResponses: [['Email/get', { list: [SENDABLE_DRAFT] }, 'getEmail']] };
+      }
+      return { methodResponses: [['EmailSubmission/set', { created: { submission: { id: 'sub-1' } } }, 'submitDraft']] };
+    });
+
+    const subId = await client.sendDraft('draft-1');
+    assert.equal(subId, 'sub-1');
+
+    // Verify submission call structure
+    const submitCall = makeReq.mock.calls[1].arguments[0];
+    assert.equal(submitCall.methodCalls[0][0], 'EmailSubmission/set');
+    assert.equal(submitCall.methodCalls[0][1].create.submission.emailId, 'draft-1');
+    assert.equal(submitCall.methodCalls[0][1].create.submission.identityId, IDENTITY.id);
+
+    // Verify envelope has all recipients (to + cc)
+    const rcptTo = submitCall.methodCalls[0][1].create.submission.envelope.rcptTo;
+    assert.equal(rcptTo.length, 2);
+    assert.deepEqual(rcptTo[0], { email: 'bob@example.com' });
+    assert.deepEqual(rcptTo[1], { email: 'cc@example.com' });
+  });
+
+  it('rejects non-draft email', async () => {
+    const nonDraft = { ...SENDABLE_DRAFT, keywords: { $seen: true } };
+    mock.method(client, 'makeRequest', async () => ({
+      methodResponses: [['Email/get', { list: [nonDraft] }, 'getEmail']],
+    }));
+
+    await assert.rejects(
+      () => client.sendDraft('email-1'),
+      (err: Error) => {
+        assert.match(err.message, /non-draft/i);
+        return true;
+      },
+    );
+  });
+
+  it('rejects draft with no recipients', async () => {
+    const noRecipients = { ...SENDABLE_DRAFT, to: [], cc: [], bcc: [] };
+    mock.method(client, 'makeRequest', async () => ({
+      methodResponses: [['Email/get', { list: [noRecipients] }, 'getEmail']],
+    }));
+
+    await assert.rejects(
+      () => client.sendDraft('draft-1'),
+      (err: Error) => {
+        assert.match(err.message, /no recipients/i);
+        return true;
+      },
+    );
+  });
+
+  it('throws when email not found', async () => {
+    mock.method(client, 'makeRequest', async () => ({
+      methodResponses: [['Email/get', { list: [] }, 'getEmail']],
+    }));
+
+    await assert.rejects(
+      () => client.sendDraft('missing-id'),
+      (err: Error) => {
+        assert.match(err.message, /not found/i);
+        return true;
+      },
+    );
+  });
+
+  it('throws on JMAP submission error', async () => {
+    mock.method(client, 'makeRequest', async (req: any) => {
+      if (req.methodCalls[0][0] === 'Email/get') {
+        return { methodResponses: [['Email/get', { list: [SENDABLE_DRAFT] }, 'getEmail']] };
+      }
+      return { methodResponses: [['error', { type: 'forbidden', description: 'not allowed' }, 'submitDraft']] };
+    });
+
+    await assert.rejects(
+      () => client.sendDraft('draft-1'),
+      (err: Error) => {
+        assert.match(err.message, /forbidden/);
+        return true;
+      },
+    );
+  });
+});
