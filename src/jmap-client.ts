@@ -449,6 +449,143 @@ export class JmapClient {
     return emailId;
   }
 
+  async updateDraft(emailId: string, updates: {
+    to?: string[];
+    cc?: string[];
+    bcc?: string[];
+    subject?: string;
+    textBody?: string;
+    htmlBody?: string;
+    from?: string;
+  }): Promise<string> {
+    const session = await this.getSession();
+
+    // Fetch the existing email
+    const getRequest: JmapRequest = {
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
+      methodCalls: [
+        ['Email/get', {
+          accountId: session.accountId,
+          ids: [emailId],
+          properties: ['id', 'subject', 'from', 'to', 'cc', 'bcc', 'textBody', 'htmlBody', 'bodyValues', 'mailboxIds', 'keywords'],
+          bodyProperties: ['partId', 'blobId', 'type', 'size'],
+          fetchTextBodyValues: true,
+          fetchHTMLBodyValues: true,
+        }, 'getEmail']
+      ]
+    };
+
+    const getResponse = await this.makeRequest(getRequest);
+    const existingEmail = this.getListResult(getResponse, 0)[0];
+    if (!existingEmail) {
+      throw new Error(`Email with ID '${emailId}' not found`);
+    }
+
+    // Verify it's a draft
+    if (!existingEmail.keywords?.$draft) {
+      throw new Error('Cannot edit a non-draft email');
+    }
+
+    // Resolve identity
+    const identities = await this.getIdentities();
+    if (!identities || identities.length === 0) {
+      throw new Error('No sending identities found');
+    }
+
+    let selectedIdentity;
+    if (updates.from) {
+      selectedIdentity = identities.find(id =>
+        id.email.toLowerCase() === updates.from?.toLowerCase()
+      );
+      if (!selectedIdentity) {
+        throw new Error('From address is not verified for sending. Choose one of your verified identities.');
+      }
+    } else {
+      // Use existing from, or fall back to default identity
+      const existingFrom = existingEmail.from?.[0]?.email;
+      if (existingFrom) {
+        selectedIdentity = identities.find(id =>
+          id.email.toLowerCase() === existingFrom.toLowerCase()
+        ) || identities.find(id => id.mayDelete === false) || identities[0];
+      } else {
+        selectedIdentity = identities.find(id => id.mayDelete === false) || identities[0];
+      }
+    }
+
+    // Extract existing body values
+    const existingTextBody = existingEmail.bodyValues
+      ? Object.values(existingEmail.bodyValues).find((bv: any) =>
+          existingEmail.textBody?.some((tb: any) => tb.partId === (bv as any).partId || true)
+        )
+      : null;
+    const existingHtmlBody = existingEmail.bodyValues
+      ? Object.values(existingEmail.bodyValues).find((bv: any) =>
+          existingEmail.htmlBody?.some((hb: any) => hb.partId === (bv as any).partId || true)
+        )
+      : null;
+
+    // Merge: updates override existing values
+    const mergedSubject = updates.subject !== undefined ? updates.subject : (existingEmail.subject || '');
+    const mergedTo = updates.to !== undefined ? updates.to.map(addr => ({ email: addr })) : (existingEmail.to || []);
+    const mergedCc = updates.cc !== undefined ? updates.cc.map(addr => ({ email: addr })) : (existingEmail.cc || []);
+    const mergedBcc = updates.bcc !== undefined ? updates.bcc.map(addr => ({ email: addr })) : (existingEmail.bcc || []);
+
+    const textBodyValue = updates.textBody !== undefined ? updates.textBody : (existingTextBody as any)?.value;
+    const htmlBodyValue = updates.htmlBody !== undefined ? updates.htmlBody : (existingHtmlBody as any)?.value;
+
+    const emailObject: any = {
+      mailboxIds: existingEmail.mailboxIds,
+      keywords: { $draft: true },
+      from: [{ email: selectedIdentity.email }],
+      to: mergedTo,
+      cc: mergedCc,
+      bcc: mergedBcc,
+      subject: mergedSubject,
+    };
+
+    if (textBodyValue) emailObject.textBody = [{ partId: 'text', type: 'text/plain' }];
+    if (htmlBodyValue) emailObject.htmlBody = [{ partId: 'html', type: 'text/html' }];
+    if (textBodyValue || htmlBodyValue) {
+      emailObject.bodyValues = {
+        ...(textBodyValue && { text: { value: textBodyValue } }),
+        ...(htmlBodyValue && { html: { value: htmlBodyValue } }),
+      };
+    }
+
+    // Atomic create + destroy in a single Email/set call
+    const request: JmapRequest = {
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
+      methodCalls: [
+        ['Email/set', {
+          accountId: session.accountId,
+          create: { draft: emailObject },
+          destroy: [emailId],
+        }, 'updateDraft']
+      ]
+    };
+
+    const response = await this.makeRequest(request);
+
+    if (response.methodResponses[0][0] === 'error') {
+      const err = response.methodResponses[0][1];
+      throw new Error(`JMAP error: ${err.type}${err.description ? ' - ' + err.description : ''}`);
+    }
+
+    const result = response.methodResponses[0][1];
+
+    if (result.notCreated?.draft) {
+      const err = result.notCreated.draft;
+      throw new Error(`Failed to create updated draft: ${err.type}${err.description ? ' - ' + err.description : ''}`);
+    }
+
+    const newEmailId = result.created?.draft?.id;
+    if (!newEmailId) {
+      throw new Error('Draft update returned no email ID');
+    }
+
+    return newEmailId;
+  }
+
   async saveDraft(email: {
     to: string[];
     cc?: string[];
@@ -542,6 +679,114 @@ export class JmapClient {
     }
 
     return draftId;
+  }
+
+  async sendDraft(emailId: string): Promise<string> {
+    const session = await this.getSession();
+
+    // Fetch the existing email to verify it's a draft
+    const getRequest: JmapRequest = {
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
+      methodCalls: [
+        ['Email/get', {
+          accountId: session.accountId,
+          ids: [emailId],
+          properties: ['id', 'from', 'to', 'cc', 'bcc', 'keywords'],
+        }, 'getEmail']
+      ]
+    };
+
+    const getResponse = await this.makeRequest(getRequest);
+    const email = this.getListResult(getResponse, 0)[0];
+    if (!email) {
+      throw new Error(`Email with ID '${emailId}' not found`);
+    }
+
+    if (!email.keywords?.$draft) {
+      throw new Error('Cannot send a non-draft email');
+    }
+
+    // Collect all recipients for the envelope
+    const allRecipients: { email: string }[] = [
+      ...(email.to || []),
+      ...(email.cc || []),
+      ...(email.bcc || []),
+    ];
+
+    if (allRecipients.length === 0) {
+      throw new Error('Draft has no recipients');
+    }
+
+    // Determine identity from the email's from field
+    const fromEmail = email.from?.[0]?.email;
+    if (!fromEmail) {
+      throw new Error('Draft has no from address');
+    }
+
+    const identities = await this.getIdentities();
+    const selectedIdentity = identities.find(id =>
+      id.email.toLowerCase() === fromEmail.toLowerCase()
+    );
+    if (!selectedIdentity) {
+      throw new Error('From address on draft does not match any sending identity');
+    }
+
+    // Find the Sent mailbox
+    const mailboxes = await this.getMailboxes();
+    const sentMailbox = mailboxes.find(mb => mb.role === 'sent') || mailboxes.find(mb => mb.name.toLowerCase().includes('sent'));
+    if (!sentMailbox) {
+      throw new Error('Could not find Sent mailbox');
+    }
+
+    const sentMailboxIds: Record<string, boolean> = {};
+    sentMailboxIds[sentMailbox.id] = true;
+
+    // Submit the draft
+    const request: JmapRequest = {
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail', 'urn:ietf:params:jmap:submission'],
+      methodCalls: [
+        ['EmailSubmission/set', {
+          accountId: session.accountId,
+          create: {
+            submission: {
+              emailId,
+              identityId: selectedIdentity.id,
+              envelope: {
+                mailFrom: { email: fromEmail },
+                rcptTo: allRecipients.map(addr => ({ email: addr.email })),
+              }
+            }
+          },
+          onSuccessUpdateEmail: {
+            '#submission': {
+              mailboxIds: sentMailboxIds,
+              'keywords/$draft': null,
+              'keywords/$seen': true,
+            }
+          }
+        }, 'submitDraft']
+      ]
+    };
+
+    const response = await this.makeRequest(request);
+
+    if (response.methodResponses[0][0] === 'error') {
+      const err = response.methodResponses[0][1];
+      throw new Error(`JMAP error submitting draft: ${err.type}${err.description ? ' - ' + err.description : ''}`);
+    }
+
+    const submissionResult = response.methodResponses[0][1];
+    if (submissionResult.notCreated?.submission) {
+      const err = submissionResult.notCreated.submission;
+      throw new Error(`Failed to submit draft: ${err.type}${err.description ? ' - ' + err.description : ''}`);
+    }
+
+    const submissionId = submissionResult.created?.submission?.id;
+    if (!submissionId) {
+      throw new Error('Draft submission returned no submission ID');
+    }
+
+    return submissionId;
   }
 
   async getRecentEmails(limit: number = 10, mailboxName: string = 'inbox'): Promise<any[]> {
