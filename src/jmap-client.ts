@@ -357,6 +357,8 @@ export class JmapClient {
     htmlBody?: string;
     from?: string;
     mailboxId?: string;
+    inReplyTo?: string[];
+    references?: string[];
   }): Promise<string> {
     const session = await this.getSession();
 
@@ -411,6 +413,8 @@ export class JmapClient {
     if (email.cc?.length) emailObject.cc = email.cc.map(addr => ({ email: addr }));
     if (email.bcc?.length) emailObject.bcc = email.bcc.map(addr => ({ email: addr }));
     if (email.subject) emailObject.subject = email.subject;
+    if (email.inReplyTo?.length) emailObject.inReplyTo = email.inReplyTo;
+    if (email.references?.length) emailObject.references = email.references;
     if (email.textBody) emailObject.textBody = [{ partId: 'text', type: 'text/plain' }];
     if (email.htmlBody) emailObject.htmlBody = [{ partId: 'html', type: 'text/html' }];
     if (email.textBody || email.htmlBody) {
@@ -584,101 +588,6 @@ export class JmapClient {
     }
 
     return newEmailId;
-  }
-
-  async saveDraft(email: {
-    to: string[];
-    cc?: string[];
-    bcc?: string[];
-    subject: string;
-    textBody?: string;
-    htmlBody?: string;
-    from?: string;
-    inReplyTo?: string[];
-    references?: string[];
-  }): Promise<string> {
-    const session = await this.getSession();
-
-    // Get all identities to validate from address
-    const identities = await this.getIdentities();
-    if (!identities || identities.length === 0) {
-      throw new Error('No sending identities found');
-    }
-
-    // Determine which identity to use
-    let selectedIdentity;
-    if (email.from) {
-      selectedIdentity = identities.find(id => 
-        id.email.toLowerCase() === email.from?.toLowerCase()
-      );
-      if (!selectedIdentity) {
-        throw new Error('From address is not verified for sending. Choose one of your verified identities.');
-      }
-    } else {
-      selectedIdentity = identities.find(id => id.mayDelete === false) || identities[0];
-    }
-
-    const fromEmail = selectedIdentity.email;
-
-    // Get the Drafts mailbox
-    const mailboxes = await this.getMailboxes();
-    const draftsMailbox = mailboxes.find(mb => mb.role === 'drafts') || mailboxes.find(mb => mb.name.toLowerCase().includes('draft'));
-    
-    if (!draftsMailbox) {
-      throw new Error('Could not find Drafts mailbox');
-    }
-
-    // Ensure we have at least one body type
-    if (!email.textBody && !email.htmlBody) {
-      throw new Error('Either textBody or htmlBody must be provided');
-    }
-
-    const mailboxIds: Record<string, boolean> = {};
-    mailboxIds[draftsMailbox.id] = true;
-
-    const emailObject: any = {
-      mailboxIds,
-      keywords: { $draft: true },
-      from: [{ email: fromEmail }],
-      to: email.to.map(addr => ({ email: addr })),
-      cc: email.cc?.map(addr => ({ email: addr })) || [],
-      bcc: email.bcc?.map(addr => ({ email: addr })) || [],
-      subject: email.subject,
-      ...(email.inReplyTo && { inReplyTo: email.inReplyTo }),
-      ...(email.references && { references: email.references }),
-      textBody: email.textBody ? [{ partId: 'text', type: 'text/plain' }] : undefined,
-      htmlBody: email.htmlBody ? [{ partId: 'html', type: 'text/html' }] : undefined,
-      bodyValues: {
-        ...(email.textBody && { text: { value: email.textBody } }),
-        ...(email.htmlBody && { html: { value: email.htmlBody } })
-      }
-    };
-
-    const request: JmapRequest = {
-      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
-      methodCalls: [
-        ['Email/set', {
-          accountId: session.accountId,
-          create: { draft: emailObject }
-        }, 'createDraft']
-      ]
-    };
-
-    const response = await this.makeRequest(request);
-
-    // Check if draft creation was successful
-    const draftResult = this.getMethodResult(response, 0);
-    if (draftResult.notCreated?.draft) {
-      const err = draftResult.notCreated.draft;
-      throw new Error(`Failed to create draft: ${err.type}${err.description ? ' - ' + err.description : ''}`);
-    }
-
-    const draftId = draftResult.created?.draft?.id;
-    if (!draftId) {
-      throw new Error('Draft creation returned no email ID');
-    }
-
-    return draftId;
   }
 
   async sendDraft(emailId: string): Promise<string> {
