@@ -273,7 +273,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'create_draft',
-        description: 'Create an email draft without sending it. Supports threading headers for replies.',
+        description: 'Create an email draft without sending it. Supports threading headers for replies. IMPORTANT: each call creates a new draft — do not call twice for the same message.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -1062,11 +1062,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           references,
         });
 
+        const summary = [
+          `Draft created successfully (Email ID: ${emailId}).`,
+          subject ? `Subject: ${subject}` : null,
+          to?.length ? `To: ${to.join(', ')}` : null,
+          cc?.length ? `CC: ${cc.join(', ')}` : null,
+        ].filter(Boolean).join(' ');
+
         return {
           content: [
             {
               type: 'text',
-              text: `Draft created successfully. Email ID: ${emailId}`,
+              text: summary,
             },
           ],
         };
