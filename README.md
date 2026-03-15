@@ -108,7 +108,7 @@ Pin to a tagged release:
 
 ```bash
 FASTMAIL_API_TOKEN="your_token" \
-  npx --yes github:MadLlama25/fastmail-mcp@v1.6.1 fastmail-mcp
+  npx --yes github:MadLlama25/fastmail-mcp@v1.7.1 fastmail-mcp
 ```
 
 ## Install as a Claude Desktop Extension (DXT)
@@ -283,6 +283,10 @@ Contributions are welcome! Please ensure that:
 2. **Missing Dependencies**: Run `npm install` to ensure all dependencies are installed  
 3. **Build Errors**: Check that TypeScript compilation completes without errors using `npm run build`
 4. **Calendar/Contacts "Forbidden" Errors**: Use `check_function_availability` to see setup guidance
+
+### Email Tools Failing with Serialization Errors?
+
+If `get_email`, `list_emails`, `search_emails`, or `advanced_search` fail with "content serialization" or "Cannot read properties of undefined" errors, upgrade to v1.7.1+. This was caused by incomplete JMAP response validation that surfaced after the MCP SDK v1.x upgrade added stricter result checking.
 
 ### Calendar/Contacts Not Working?
 
