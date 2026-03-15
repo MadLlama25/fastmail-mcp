@@ -220,3 +220,98 @@ describe('createDraft', () => {
     assert.deepEqual(emailObj.bodyValues, { html: { value: '<p>Hello</p>' } });
   });
 });
+
+describe('JMAP response validation', () => {
+  let client: JmapClient;
+
+  beforeEach(() => {
+    client = makeClient();
+  });
+
+  it('throws when methodResponses is missing', async () => {
+    stubMakeRequest(client, { sessionState: 's1' });
+    await assert.rejects(
+      () => client.getEmailById('email-1'),
+      (err: Error) => {
+        assert.match(err.message, /missing expected method/i);
+        return true;
+      },
+    );
+  });
+
+  it('throws when index exceeds methodResponses length', async () => {
+    stubMakeRequest(client, {
+      methodResponses: [
+        ['error', { type: 'serverFail', description: 'oops' }, 'query'],
+      ],
+    });
+    // getEmails uses getListResult(response, 1) but only 1 response exists
+    await assert.rejects(
+      () => client.getEmails(undefined, 10),
+      (err: Error) => {
+        assert.ok(err.message.length > 0);
+        return true;
+      },
+    );
+  });
+
+  it('throws on malformed methodResponses entry', async () => {
+    stubMakeRequest(client, {
+      methodResponses: ['not-a-tuple' as any],
+    });
+    await assert.rejects(
+      () => client.getEmailById('email-1'),
+      (err: Error) => {
+        assert.match(err.message, /malformed/i);
+        return true;
+      },
+    );
+  });
+});
+
+describe('searchEmails', () => {
+  let client: JmapClient;
+
+  beforeEach(() => {
+    client = makeClient();
+  });
+
+  it('returns email list on success', async () => {
+    stubMakeRequest(client, {
+      methodResponses: [
+        ['Email/query', { ids: ['e1'] }, 'query'],
+        ['Email/get', { list: [{ id: 'e1', subject: 'Test' }] }, 'emails'],
+      ],
+    });
+    const results = await client.searchEmails('test', 10);
+    assert.equal(results.length, 1);
+    assert.equal(results[0].subject, 'Test');
+  });
+
+  it('returns empty array when no results', async () => {
+    stubMakeRequest(client, {
+      methodResponses: [
+        ['Email/query', { ids: [] }, 'query'],
+        ['Email/get', { list: [] }, 'emails'],
+      ],
+    });
+    const results = await client.searchEmails('nonexistent');
+    assert.deepEqual(results, []);
+  });
+
+  it('throws on JMAP error in query', async () => {
+    stubMakeRequest(client, {
+      methodResponses: [
+        ['error', { type: 'invalidArguments', description: 'bad filter' }, 'query'],
+        ['error', { type: 'invalidArguments', description: 'bad filter' }, 'emails'],
+      ],
+    });
+    await assert.rejects(
+      () => client.searchEmails('test'),
+      (err: Error) => {
+        assert.match(err.message, /invalidArguments/);
+        return true;
+      },
+    );
+  });
+});
