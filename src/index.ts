@@ -1,12 +1,15 @@
 #!/usr/bin/env node
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import {
   CallToolRequestSchema,
   ErrorCode,
   ListToolsRequestSchema,
   McpError,
 } from '@modelcontextprotocol/sdk/types.js';
+import { createServer } from 'node:http';
+import { randomUUID } from 'node:crypto';
 import { FastmailAuth, FastmailConfig } from './auth.js';
 import { JmapClient } from './jmap-client.js';
 import { ContactsCalendarClient } from './contacts-calendar.js';
@@ -1723,14 +1726,101 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 });
 
-async function runServer() {
+async function runStdio() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error('Fastmail MCP server running on stdio');
 }
 
-runServer().catch(() => {
-  // Avoid logging raw error objects to prevent accidental PII leakage
+async function runHttp() {
+  const port = parseInt(process.env.MCP_HTTP_PORT || '3000', 10);
+  const authToken = process.env.MCP_AUTH_TOKEN;
+
+  const transports = new Map<string, StreamableHTTPServerTransport>();
+
+  const httpServer = createServer(async (req, res) => {
+    const url = new URL(req.url || '/', `http://localhost:${port}`);
+
+    // Health check
+    if (url.pathname === '/health') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ status: 'ok' }));
+      return;
+    }
+
+    // Only handle /mcp
+    if (url.pathname !== '/mcp') {
+      res.writeHead(404);
+      res.end('Not Found');
+      return;
+    }
+
+    // Bearer token auth
+    if (authToken) {
+      const authHeader = req.headers.authorization;
+      if (!authHeader || authHeader !== `Bearer ${authToken}`) {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Unauthorized' }));
+        return;
+      }
+    }
+
+    // Parse JSON body for POST requests
+    let body: unknown = undefined;
+    if (req.method === 'POST') {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req) {
+        chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
+      }
+      try {
+        body = JSON.parse(Buffer.concat(chunks).toString());
+      } catch {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid JSON' }));
+        return;
+      }
+    }
+
+    // Handle session routing
+    const sessionId = req.headers['mcp-session-id'] as string | undefined;
+
+    if (sessionId && transports.has(sessionId)) {
+      // Existing session
+      const transport = transports.get(sessionId)!;
+      await transport.handleRequest(req, res, body);
+    } else if (req.method === 'POST' && !sessionId) {
+      // New session - create transport and connect a new server instance
+      const transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: () => randomUUID(),
+        onsessioninitialized: (id) => {
+          transports.set(id, transport);
+        },
+        onsessionclosed: (id) => {
+          transports.delete(id);
+        },
+      });
+      await server.connect(transport);
+      await transport.handleRequest(req, res, body);
+    } else if (req.method === 'GET') {
+      // SSE connection attempt without valid session
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Invalid or missing session ID' }));
+    } else {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Invalid request' }));
+    }
+  });
+
+  httpServer.listen(port, () => {
+    console.error(`Fastmail MCP server running on http://0.0.0.0:${port}/mcp`);
+  });
+}
+
+const mode = process.argv.includes('--http') ? 'http'
+  : process.env.MCP_TRANSPORT === 'http' ? 'http'
+  : 'stdio';
+
+(mode === 'http' ? runHttp() : runStdio()).catch(() => {
   console.error('Fastmail MCP server failed to start');
   process.exit(1);
 });
