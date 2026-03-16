@@ -14,6 +14,7 @@ import { FastmailAuth, FastmailConfig } from './auth.js';
 import { JmapClient } from './jmap-client.js';
 import { ContactsCalendarClient } from './contacts-calendar.js';
 
+function createMcpServer() {
 const server = new Server(
   {
     name: 'fastmail-mcp',
@@ -1726,7 +1727,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 });
 
+return server;
+}
+
 async function runStdio() {
+  const server = createMcpServer();
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error('Fastmail MCP server running on stdio');
@@ -1799,7 +1804,8 @@ async function runHttp() {
           transports.delete(id);
         },
       });
-      await server.connect(transport);
+      const sessionServer = createMcpServer();
+      await sessionServer.connect(transport);
       await transport.handleRequest(req, res, body);
     } else if (req.method === 'GET') {
       // SSE connection attempt without valid session
