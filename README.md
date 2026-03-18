@@ -242,6 +242,26 @@ The server uses bearer token authentication with Fastmail's API. API tokens prov
 ### Rate Limits
 Fastmail applies rate limits to API requests. The server handles standard rate limiting, but excessive requests may be throttled.
 
+## CalDAV Calendar Support
+
+Fastmail does not currently expose calendar access via JMAP API tokens — the `urn:ietf:params:jmap:calendars` scope is not available because the JMAP Calendars specification is still an IETF Internet-Draft ([draft-ietf-jmap-calendars](https://datatracker.ietf.org/doc/draft-ietf-jmap-calendars/)). Fastmail has stated they will add JMAP calendar support once the spec becomes an RFC, but there is no public timeline.
+
+However, Fastmail fully supports **CalDAV** for calendar access via `caldav.fastmail.com`. This server automatically falls back to CalDAV when JMAP calendar access is unavailable.
+
+### Setup
+
+1. Create an app-specific password on Fastmail:
+   - Go to **Settings → Privacy & Security → Manage app passwords**
+   - Create a new app password (you can name it "CalDAV MCP" or similar)
+
+2. Set the following environment variables:
+   ```bash
+   export FASTMAIL_CALDAV_USERNAME="your-email@fastmail.com"
+   export FASTMAIL_CALDAV_PASSWORD="your-app-specific-password"
+   ```
+
+When these variables are set, the calendar tools (`list_calendars`, `list_calendar_events`, `get_calendar_event`, `create_calendar_event`) will automatically fall back to CalDAV if JMAP calendars are not available. When these variables are not set, the server behaves exactly as before (JMAP only).
+
 ## Development
 
 ### Project Structure
@@ -250,7 +270,8 @@ src/
 ├── index.ts              # Main MCP server implementation
 ├── auth.ts              # Authentication handling
 ├── jmap-client.ts       # JMAP client wrapper
-└── contacts-calendar.ts # Contacts and calendar extensions
+├── contacts-calendar.ts # Contacts and calendar extensions
+└── caldav-client.ts     # CalDAV calendar client (fallback)
 ```
 
 ### Building
