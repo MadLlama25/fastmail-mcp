@@ -857,9 +857,11 @@ export class JmapClient {
     );
 
     // If not found, try by array index
-    if (!attachment && !isNaN(parseInt(attachmentId))) {
-      const index = parseInt(attachmentId);
-      attachment = email.attachments?.[index];
+    if (!attachment) {
+      const index = parseInt(attachmentId, 10);
+      if (!isNaN(index)) {
+        attachment = email.attachments?.[index];
+      }
     }
     
     if (!attachment) {

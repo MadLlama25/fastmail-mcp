@@ -26,17 +26,6 @@ const server = new Server(
 let jmapClient: JmapClient | null = null;
 let contactsCalendarClient: ContactsCalendarClient | null = null;
 
-function resolveEnvValue(...keys: string[]): string | undefined {
-  const isPlaceholder = (val: string) => /\$\{[^}]+\}/.test(val.trim());
-  for (const key of keys) {
-    const raw = process.env[key];
-    if (typeof raw === 'string' && raw.trim().length > 0 && !isPlaceholder(raw)) {
-      return raw.trim();
-    }
-  }
-  return undefined;
-}
-
 function findEnvValue(keys: string[]): { value?: string; key?: string; wasPlaceholder: boolean } {
   const isPlaceholder = (val: string) => /\$\{[^}]+\}/.test(val.trim());
   for (const key of keys) {
@@ -900,8 +889,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'list_emails': {
-        const { mailboxId, limit = 20 } = args as any;
-        const emails = await client.getEmails(mailboxId, limit);
+        const { mailboxId, limit } = args as any;
+        const validLimit = Math.min(Math.max(Number(limit) || 20, 1), 50);
+        const emails = await client.getEmails(mailboxId, validLimit);
         return {
           content: [
             {
@@ -996,7 +986,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         // Default recipients to the original sender
         const replyTo = (to && Array.isArray(to) && to.length > 0)
           ? to
-          : originalEmail.from?.map((addr: any) => addr.email).filter(Boolean) || [];
+          : (Array.isArray(originalEmail.from) ? originalEmail.from.map((addr: any) => addr.email).filter(Boolean) : []);
 
         if (replyTo.length === 0) {
           throw new McpError(ErrorCode.InvalidParams, 'Could not determine reply recipient. Please provide "to" explicitly.');
