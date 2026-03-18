@@ -45,18 +45,13 @@ function maskSecret(value: string): string {
   return `${value.slice(0, 4)}…${value.slice(-2)} (len ${value.length})`;
 }
 
-function initializeClient(): JmapClient {
-  if (jmapClient) {
-    return jmapClient;
-  }
-
+function getAuthConfig(): FastmailConfig {
   const tokenInfo = findEnvValue([
     'FASTMAIL_API_TOKEN',
     'USER_CONFIG_FASTMAIL_API_TOKEN',
     'USER_CONFIG_fastmail_api_token',
     'fastmail_api_token',
   ]);
-  // production: do not log token-related env details
   const apiToken = tokenInfo.value;
   if (!apiToken) {
     throw new McpError(
@@ -71,14 +66,16 @@ function initializeClient(): JmapClient {
     'USER_CONFIG_fastmail_base_url',
     'fastmail_base_url',
   ]);
-  // production: do not log base URL env details
 
-  const config: FastmailConfig = {
-    apiToken,
-    baseUrl: baseInfo.value
-  };
+  return { apiToken, baseUrl: baseInfo.value };
+}
 
-  const auth = new FastmailAuth(config);
+function initializeClient(): JmapClient {
+  if (jmapClient) {
+    return jmapClient;
+  }
+
+  const auth = new FastmailAuth(getAuthConfig());
   jmapClient = new JmapClient(auth);
   return jmapClient;
 }
@@ -88,35 +85,7 @@ function initializeContactsCalendarClient(): ContactsCalendarClient {
     return contactsCalendarClient;
   }
 
-  const tokenInfo = findEnvValue([
-    'FASTMAIL_API_TOKEN',
-    'USER_CONFIG_FASTMAIL_API_TOKEN',
-    'USER_CONFIG_fastmail_api_token',
-    'fastmail_api_token',
-  ]);
-  // production: do not log token-related env details (contacts/calendar)
-  const apiToken = tokenInfo.value;
-  if (!apiToken) {
-    throw new McpError(
-      ErrorCode.InvalidRequest,
-      'FASTMAIL_API_TOKEN environment variable is required'
-    );
-  }
-
-  const baseInfo = findEnvValue([
-    'FASTMAIL_BASE_URL',
-    'USER_CONFIG_FASTMAIL_BASE_URL',
-    'USER_CONFIG_fastmail_base_url',
-    'fastmail_base_url',
-  ]);
-  // production: do not log base URL env details (contacts/calendar)
-
-  const config: FastmailConfig = {
-    apiToken,
-    baseUrl: baseInfo.value
-  };
-
-  const auth = new FastmailAuth(config);
+  const auth = new FastmailAuth(getAuthConfig());
   contactsCalendarClient = new ContactsCalendarClient(auth);
   return contactsCalendarClient;
 }
