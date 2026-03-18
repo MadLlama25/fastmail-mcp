@@ -90,7 +90,12 @@ export class JmapClient {
     };
 
     const response = await this.makeRequest(request);
-    return response.methodResponses[0][1].list;
+    const result = response.methodResponses?.[0]?.[1] as any;
+    if (!result?.list) {
+      const debugInfo = JSON.stringify(response.methodResponses?.[0]?.slice?.(0, 2) ?? response.methodResponses ?? null);
+      throw new Error(`getMailboxes: unexpected JMAP response: ${(debugInfo ?? '').slice(0, 500)}`);
+    }
+    return result.list;
   }
 
   async getEmails(mailboxId?: string, limit: number = 20): Promise<any[]> {

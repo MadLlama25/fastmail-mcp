@@ -11,20 +11,27 @@
     "build": "tsc",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
+    "test": "vitest run",
     "prepare": "npm run build"
   },
   "engines": {
     "node": ">=18"
   },
-  "keywords": ["mcp", "fastmail", "email", "jmap"],
+  "keywords": [
+    "mcp",
+    "fastmail",
+    "email",
+    "jmap"
+  ],
   "author": "Jeremy Gill",
   "license": "MIT",
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^0.6.0"
+    "@modelcontextprotocol/sdk": "^1.11.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
     "tsx": "^4.0.0",
-    "typescript": "^5.0.0"
+    "typescript": "^5.0.0",
+    "vitest": "^4.1.0"
   }
 }
