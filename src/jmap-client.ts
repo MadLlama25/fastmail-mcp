@@ -115,6 +115,11 @@ export class JmapClient {
     return data as JmapResponse;
   }
 
+  protected findMailboxByRoleOrName(mailboxes: any[], role: string, nameFallback?: string): any | undefined {
+    return mailboxes.find(mb => mb.role === role) ||
+           (nameFallback ? mailboxes.find(mb => mb.name.toLowerCase().includes(nameFallback)) : undefined);
+  }
+
   async getMailboxes(): Promise<any[]> {
     const session = await this.getSession();
     
@@ -249,9 +254,9 @@ export class JmapClient {
 
     // Get the mailbox IDs we need
     const mailboxes = await this.getMailboxes();
-    const draftsMailbox = mailboxes.find(mb => mb.role === 'drafts') || mailboxes.find(mb => mb.name.toLowerCase().includes('draft'));
-    const sentMailbox = mailboxes.find(mb => mb.role === 'sent') || mailboxes.find(mb => mb.name.toLowerCase().includes('sent'));
-    
+    const draftsMailbox = this.findMailboxByRoleOrName(mailboxes, 'drafts', 'draft');
+    const sentMailbox = this.findMailboxByRoleOrName(mailboxes, 'sent', 'sent');
+
     if (!draftsMailbox) {
       throw new Error('Could not find Drafts mailbox to save email');
     }
@@ -390,7 +395,7 @@ export class JmapClient {
       draftMailboxId = email.mailboxId;
     } else {
       const mailboxes = await this.getMailboxes();
-      const draftsMailbox = mailboxes.find(mb => mb.role === 'drafts') || mailboxes.find(mb => mb.name.toLowerCase().includes('draft'));
+      const draftsMailbox = this.findMailboxByRoleOrName(mailboxes, 'drafts', 'draft');
       if (!draftsMailbox) {
         throw new Error('Could not find Drafts mailbox');
       }
@@ -484,8 +489,8 @@ export class JmapClient {
 
     // Get the Drafts mailbox
     const mailboxes = await this.getMailboxes();
-    const draftsMailbox = mailboxes.find(mb => mb.role === 'drafts') || mailboxes.find(mb => mb.name.toLowerCase().includes('draft'));
-    
+    const draftsMailbox = this.findMailboxByRoleOrName(mailboxes, 'drafts', 'draft');
+
     if (!draftsMailbox) {
       throw new Error('Could not find Drafts mailbox');
     }
@@ -610,8 +615,8 @@ export class JmapClient {
     
     // Find the trash mailbox
     const mailboxes = await this.getMailboxes();
-    const trashMailbox = mailboxes.find(mb => mb.role === 'trash') || mailboxes.find(mb => mb.name.toLowerCase().includes('trash'));
-    
+    const trashMailbox = this.findMailboxByRoleOrName(mailboxes, 'trash', 'trash');
+
     if (!trashMailbox) {
       throw new Error('Could not find Trash mailbox');
     }
@@ -1177,7 +1182,7 @@ export class JmapClient {
 
     // Find the trash mailbox
     const mailboxes = await this.getMailboxes();
-    const trashMailbox = mailboxes.find(mb => mb.role === 'trash') || mailboxes.find(mb => mb.name.toLowerCase().includes('trash'));
+    const trashMailbox = this.findMailboxByRoleOrName(mailboxes, 'trash', 'trash');
 
     if (!trashMailbox) {
       throw new Error('Could not find Trash mailbox');
