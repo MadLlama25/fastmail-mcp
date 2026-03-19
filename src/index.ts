@@ -232,7 +232,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'reply_email',
-        description: 'Reply to an existing email with proper threading headers (In-Reply-To, References). Automatically fetches the original email to build the reply chain.',
+        description: 'Reply to an existing email with proper threading headers (In-Reply-To, References). Automatically fetches the original email to build the reply chain. By default sends immediately; set send=false to save as a draft instead.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -266,6 +266,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             htmlBody: {
               type: 'string',
               description: 'HTML body (optional)',
+            },
+            send: {
+              type: 'boolean',
+              description: 'Whether to send the reply immediately (default: true). Set to false to save as draft instead.',
             },
           },
           required: ['originalEmailId'],
@@ -982,11 +986,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'reply_email': {
-        const { originalEmailId, to, cc, bcc, from, textBody, htmlBody } = args as any;
+        const { originalEmailId, to, cc, bcc, from, textBody, htmlBody, send: shouldSend = true } = args as any;
         if (!originalEmailId) {
           throw new McpError(ErrorCode.InvalidParams, 'originalEmailId is required');
         }
-        if (!textBody && !htmlBody) {
+        if (shouldSend && !textBody && !htmlBody) {
           throw new McpError(ErrorCode.InvalidParams, 'Either textBody or htmlBody is required');
         }
 
@@ -1020,7 +1024,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           throw new McpError(ErrorCode.InvalidParams, 'Could not determine reply recipient. Please provide "to" explicitly.');
         }
 
-        const submissionId = await client.sendEmail({
+        const replyParams = {
           to: replyTo,
           cc,
           bcc,
@@ -1030,7 +1034,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           htmlBody,
           inReplyTo: inReplyToHeader,
           references: referencesHeader,
-        });
+        };
+
+        if (!shouldSend) {
+          const emailId = await client.createDraft(replyParams);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Reply draft saved successfully (Email ID: ${emailId}). Subject: ${replySubject}`,
+              },
+            ],
+          };
+        }
+
+        const submissionId = await client.sendEmail(replyParams);
 
         return {
           content: [
