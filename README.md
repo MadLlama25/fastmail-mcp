@@ -148,8 +148,8 @@ You can install this server as a Desktop Extension for Claude Desktop using the 
   - Parameters: `emailId` (required)
 - **send_email**: Send an email (supports threading via optional `inReplyTo` and `references` headers)
   - Parameters: `to` (required array), `cc` (optional array), `bcc` (optional array), `from` (optional), `mailboxId` (optional), `subject` (required), `textBody` (optional), `htmlBody` (optional), `inReplyTo` (optional array), `references` (optional array)
-- **reply_email**: Reply to an existing email with proper threading headers (automatically builds In-Reply-To and References)
-  - Parameters: `originalEmailId` (required), `to` (optional array, defaults to original sender), `cc` (optional array), `bcc` (optional array), `from` (optional), `textBody` (optional), `htmlBody` (optional)
+- **reply_email**: Reply to an existing email with proper threading headers (automatically builds In-Reply-To and References). Set `send=false` to save as draft instead of sending.
+  - Parameters: `originalEmailId` (required), `to` (optional array, defaults to original sender), `cc` (optional array), `bcc` (optional array), `from` (optional), `textBody` (optional), `htmlBody` (optional), `send` (optional boolean, default: true)
 - **save_draft**: Save an email as a draft without sending (supports threading headers for reply drafts)
   - Parameters: `to` (required array), `cc` (optional array), `bcc` (optional array), `from` (optional), `subject` (required), `textBody` (optional), `htmlBody` (optional), `inReplyTo` (optional array), `references` (optional array)
 - **create_draft**: Create a minimal email draft (at least one of to/subject/body required)
