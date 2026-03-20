@@ -586,6 +586,25 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: 'pin_email',
+        description: 'Pin or unpin an email',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            emailId: {
+              type: 'string',
+              description: 'ID of the email to pin/unpin',
+            },
+            pinned: {
+              type: 'boolean',
+              description: 'true to pin, false to unpin',
+              default: true,
+            },
+          },
+          required: ['emailId'],
+        },
+      },
+      {
         name: 'delete_email',
         description: 'Delete an email (move to trash)',
         inputSchema: {
@@ -721,6 +740,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: 'boolean',
               description: 'Filter unread emails',
             },
+            isPinned: {
+              type: 'boolean',
+              description: 'Filter pinned emails',
+            },
             mailboxId: {
               type: 'string',
               description: 'Search within specific mailbox',
@@ -790,6 +813,26 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             read: {
               type: 'boolean',
               description: 'true to mark as read, false as unread',
+              default: true,
+            },
+          },
+          required: ['emailIds'],
+        },
+      },
+      {
+        name: 'bulk_pin',
+        description: 'Pin or unpin multiple emails',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            emailIds: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Array of email IDs to pin/unpin',
+            },
+            pinned: {
+              type: 'boolean',
+              description: 'true to pin, false to unpin',
               default: true,
             },
           },
@@ -1319,6 +1362,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
+      case 'pin_email': {
+        const { emailId, pinned = true } = args as any;
+        if (!emailId) {
+          throw new McpError(ErrorCode.InvalidParams, 'emailId is required');
+        }
+        const client = initializeClient();
+        await client.pinEmail(emailId, pinned);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Email ${pinned ? 'pinned' : 'unpinned'} successfully`,
+            },
+          ],
+        };
+      }
+
       case 'delete_email': {
         const { emailId } = args as any;
         if (!emailId) {
@@ -1448,10 +1508,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'advanced_search': {
-        const { query, from, to, subject, hasAttachment, isUnread, mailboxId, after, before, limit } = args as any;
+        const { query, from, to, subject, hasAttachment, isUnread, isPinned, mailboxId, after, before, limit } = args as any;
         const client = initializeClient();
         const emails = await client.advancedSearch({
-          query, from, to, subject, hasAttachment, isUnread, mailboxId, after, before, limit
+          query, from, to, subject, hasAttachment, isUnread, isPinned, mailboxId, after, before, limit
         });
         return {
           content: [
@@ -1524,6 +1584,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             {
               type: 'text',
               text: `${emailIds.length} emails ${read ? 'marked as read' : 'marked as unread'} successfully`,
+            },
+          ],
+        };
+      }
+
+      case 'bulk_pin': {
+        const { emailIds, pinned = true } = args as any;
+        if (!emailIds || !Array.isArray(emailIds) || emailIds.length === 0) {
+          throw new McpError(ErrorCode.InvalidParams, 'emailIds array is required and must not be empty');
+        }
+        const client = initializeClient();
+        await client.bulkPinEmails(emailIds, pinned);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `${emailIds.length} emails ${pinned ? 'pinned' : 'unpinned'} successfully`,
             },
           ],
         };
@@ -1615,9 +1692,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             available: true,
             functions: [
               'list_mailboxes', 'list_emails', 'get_email', 'send_email', 'create_draft', 'edit_draft', 'send_draft', 'search_emails',
-              'get_recent_emails', 'mark_email_read', 'delete_email', 'move_email',
+              'get_recent_emails', 'mark_email_read', 'pin_email', 'delete_email', 'move_email',
               'get_email_attachments', 'download_attachment', 'advanced_search', 'get_thread',
-              'get_mailbox_stats', 'get_account_summary', 'bulk_mark_read', 'bulk_move', 'bulk_delete',
+              'get_mailbox_stats', 'get_account_summary', 'bulk_mark_read', 'bulk_pin', 'bulk_move', 'bulk_delete',
               'add_labels', 'remove_labels', 'bulk_add_labels', 'bulk_remove_labels'
             ]
           },
