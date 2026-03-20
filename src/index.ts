@@ -8,13 +8,13 @@ import {
   McpError,
 } from '@modelcontextprotocol/sdk/types.js';
 import { FastmailAuth, FastmailConfig } from './auth.js';
-import { JmapClient, JmapRequest } from './jmap-client.js';
+import { JmapClient } from './jmap-client.js';
 import { ContactsCalendarClient } from './contacts-calendar.js';
 
 const server = new Server(
   {
     name: 'fastmail-mcp',
-    version: '1.7.0',
+    version: '1.7.1',
   },
   {
     capabilities: {
@@ -1146,33 +1146,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (!query) {
           throw new McpError(ErrorCode.InvalidParams, 'query is required');
         }
-
-        // For search, we'll use the Email/query method with a text filter
-        const session = await client.getSession();
-        const request: JmapRequest = {
-          using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
-          methodCalls: [
-            ['Email/query', {
-              accountId: session.accountId,
-              filter: { text: query },
-              sort: [{ property: 'receivedAt', isAscending: false }],
-              limit
-            }, 'query'],
-            ['Email/get', {
-              accountId: session.accountId,
-              '#ids': { resultOf: 'query', name: 'Email/query', path: '/ids' },
-              properties: ['id', 'subject', 'from', 'to', 'receivedAt', 'preview', 'hasAttachment']
-            }, 'emails']
-          ]
-        };
-
-        const response = await client.makeRequest(request);
-        const emailResult = response.methodResponses[1];
-        if (emailResult[0] === 'error') {
-          throw new McpError(ErrorCode.InternalError, `JMAP error: ${emailResult[1].type}`);
-        }
-        const emails = emailResult[1].list || [];
-
+        const emails = await client.searchEmails(query, limit);
         return {
           content: [
             {

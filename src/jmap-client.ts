@@ -32,7 +32,16 @@ export class JmapClient {
    * Extract the result from a JMAP method response, throwing on method-level errors.
    */
   protected getMethodResult(response: JmapResponse, index: number): any {
-    const [tag, result] = response.methodResponses[index];
+    if (!response.methodResponses || index >= response.methodResponses.length) {
+      throw new Error(
+        `JMAP response missing expected method at index ${index} (got ${response.methodResponses?.length ?? 0} responses)`
+      );
+    }
+    const entry = response.methodResponses[index];
+    if (!Array.isArray(entry) || entry.length < 2) {
+      throw new Error(`JMAP response entry at index ${index} is malformed`);
+    }
+    const [tag, result] = entry;
     if (tag === 'error') {
       throw new Error(`JMAP error: ${result.type}${result.description ? ' - ' + result.description : ''}`);
     }
@@ -99,7 +108,11 @@ export class JmapClient {
       throw new Error(`JMAP request failed: ${response.statusText}`);
     }
 
-    return await response.json() as JmapResponse;
+    const data = await response.json();
+    if (!data || !Array.isArray(data.methodResponses)) {
+      throw new Error('Invalid JMAP response: missing or malformed methodResponses');
+    }
+    return data as JmapResponse;
   }
 
   async getMailboxes(): Promise<any[]> {
@@ -309,13 +322,7 @@ export class JmapClient {
 
     const response = await this.makeRequest(request);
 
-    // Check for JMAP method-level error on Email/set
-    if (response.methodResponses[0][0] === 'error') {
-      const err = response.methodResponses[0][1];
-      throw new Error(`JMAP error creating email: ${err.type}${err.description ? ' - ' + err.description : ''}`);
-    }
-
-    const emailResult = response.methodResponses[0][1];
+    const emailResult = this.getMethodResult(response, 0);
     if (emailResult.notCreated?.draft) {
       const err = emailResult.notCreated.draft;
       throw new Error(`Failed to create email: ${err.type}${err.description ? ' - ' + err.description : ''}`);
@@ -326,13 +333,7 @@ export class JmapClient {
       throw new Error('Email creation returned no email ID');
     }
 
-    // Check for JMAP method-level error on EmailSubmission/set
-    if (response.methodResponses[1][0] === 'error') {
-      const err = response.methodResponses[1][1];
-      throw new Error(`JMAP error submitting email: ${err.type}${err.description ? ' - ' + err.description : ''}`);
-    }
-
-    const submissionResult = response.methodResponses[1][1];
+    const submissionResult = this.getMethodResult(response, 1);
     if (submissionResult.notCreated?.submission) {
       const err = submissionResult.notCreated.submission;
       throw new Error(`Failed to submit email: ${err.type}${err.description ? ' - ' + err.description : ''}`);
@@ -434,13 +435,7 @@ export class JmapClient {
 
     const response = await this.makeRequest(request);
 
-    // Bug 1: Check for JMAP method-level error
-    if (response.methodResponses[0][0] === 'error') {
-      const err = response.methodResponses[0][1];
-      throw new Error(`JMAP error: ${err.type}${err.description ? ' - ' + err.description : ''}`);
-    }
-
-    const result = response.methodResponses[0][1];
+    const result = this.getMethodResult(response, 0);
 
     // Bug 2: Propagate server-provided error details from notCreated
     if (result.notCreated?.draft) {
@@ -757,7 +752,7 @@ export class JmapClient {
     };
 
     const response = await this.makeRequest(request);
-    const result = response.methodResponses[0][1];
+    const result = this.getMethodResult(response, 0);
     
     if (result.notUpdated && result.notUpdated[emailId]) {
       throw new Error(`Failed to mark email as ${read ? 'read' : 'unread'}.`);
@@ -793,7 +788,7 @@ export class JmapClient {
     };
 
     const response = await this.makeRequest(request);
-    const result = response.methodResponses[0][1];
+    const result = this.getMethodResult(response, 0);
     
     if (result.notUpdated && result.notUpdated[emailId]) {
       throw new Error('Failed to delete email.');
@@ -839,7 +834,7 @@ export class JmapClient {
     };
 
     const response = await this.makeRequest(request);
-    const result = response.methodResponses[0][1];
+    const result = this.getMethodResult(response, 0);
 
     if (result.notUpdated && result.notUpdated[emailId]) {
       throw new Error('Failed to move email.');
@@ -868,7 +863,7 @@ export class JmapClient {
     };
 
     const response = await this.makeRequest(request);
-    const result = response.methodResponses[0][1];
+    const result = this.getMethodResult(response, 0);
 
     if (result.notUpdated && result.notUpdated[emailId]) {
       throw new Error('Failed to add labels to email.');
@@ -897,7 +892,7 @@ export class JmapClient {
     };
 
     const response = await this.makeRequest(request);
-    const result = response.methodResponses[0][1];
+    const result = this.getMethodResult(response, 0);
 
     if (result.notUpdated && result.notUpdated[emailId]) {
       throw new Error('Failed to remove labels from email.');
@@ -929,7 +924,7 @@ export class JmapClient {
     };
 
     const response = await this.makeRequest(request);
-    const result = response.methodResponses[0][1];
+    const result = this.getMethodResult(response, 0);
 
     if (result.notUpdated && Object.keys(result.notUpdated).length > 0) {
       throw new Error('Failed to add labels to some emails.');
@@ -961,7 +956,7 @@ export class JmapClient {
     };
 
     const response = await this.makeRequest(request);
-    const result = response.methodResponses[0][1];
+    const result = this.getMethodResult(response, 0);
 
     if (result.notUpdated && Object.keys(result.notUpdated).length > 0) {
       throw new Error('Failed to remove labels from some emails.');
@@ -1114,6 +1109,30 @@ export class JmapClient {
     return this.getListResult(response, 1);
   }
 
+  async searchEmails(query: string, limit: number = 20): Promise<any[]> {
+    const session = await this.getSession();
+
+    const request: JmapRequest = {
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
+      methodCalls: [
+        ['Email/query', {
+          accountId: session.accountId,
+          filter: { text: query },
+          sort: [{ property: 'receivedAt', isAscending: false }],
+          limit
+        }, 'query'],
+        ['Email/get', {
+          accountId: session.accountId,
+          '#ids': { resultOf: 'query', name: 'Email/query', path: '/ids' },
+          properties: ['id', 'subject', 'from', 'to', 'receivedAt', 'preview', 'hasAttachment']
+        }, 'emails']
+      ]
+    };
+
+    const response = await this.makeRequest(request);
+    return this.getListResult(response, 1);
+  }
+
   async getThread(threadId: string): Promise<any[]> {
     const session = await this.getSession();
 
@@ -1252,7 +1271,7 @@ export class JmapClient {
     };
 
     const response = await this.makeRequest(request);
-    const result = response.methodResponses[0][1];
+    const result = this.getMethodResult(response, 0);
     
     if (result.notUpdated && Object.keys(result.notUpdated).length > 0) {
       throw new Error('Failed to update some emails.');
@@ -1300,7 +1319,7 @@ export class JmapClient {
     };
 
     const response = await this.makeRequest(request);
-    const result = response.methodResponses[0][1];
+    const result = this.getMethodResult(response, 0);
 
     if (result.notUpdated && Object.keys(result.notUpdated).length > 0) {
       throw new Error('Failed to move some emails.');
@@ -1337,7 +1356,7 @@ export class JmapClient {
     };
 
     const response = await this.makeRequest(request);
-    const result = response.methodResponses[0][1];
+    const result = this.getMethodResult(response, 0);
 
     if (result.notUpdated && Object.keys(result.notUpdated).length > 0) {
       throw new Error('Failed to delete some emails.');
