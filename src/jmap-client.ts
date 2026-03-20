@@ -605,6 +605,32 @@ export class JmapClient {
     }
   }
 
+  async pinEmail(emailId: string, pinned: boolean = true): Promise<void> {
+    const session = await this.getSession();
+
+    const update: Record<string, any> = {};
+    update[emailId] = pinned
+      ? { 'keywords/$flagged': true }
+      : { 'keywords/$flagged': null };
+
+    const request: JmapRequest = {
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
+      methodCalls: [
+        ['Email/set', {
+          accountId: session.accountId,
+          update
+        }, 'pinEmail']
+      ]
+    };
+
+    const response = await this.makeRequest(request);
+    const result = this.getMethodResult(response, 0);
+
+    if (result.notUpdated && result.notUpdated[emailId]) {
+      throw new Error(`Failed to ${pinned ? 'pin' : 'unpin'} email.`);
+    }
+  }
+
   async deleteEmail(emailId: string): Promise<void> {
     const session = await this.getSession();
     
@@ -908,6 +934,7 @@ export class JmapClient {
     subject?: string;
     hasAttachment?: boolean;
     isUnread?: boolean;
+    isPinned?: boolean;
     mailboxId?: string;
     after?: string;
     before?: string;
@@ -923,15 +950,24 @@ export class JmapClient {
     if (filters.to) filter.to = filters.to;
     if (filters.subject) filter.subject = filters.subject;
     if (filters.hasAttachment !== undefined) filter.hasAttachment = filters.hasAttachment;
-    if (filters.isUnread !== undefined) filter.hasKeyword = filters.isUnread ? undefined : '$seen';
+    if (filters.isUnread === true) filter.notKeyword = '$seen';
+    else if (filters.isUnread === false) filter.hasKeyword = '$seen';
+    if (filters.isPinned === true) filter.hasKeyword = '$flagged';
+    if (filters.isPinned === false) filter.notKeyword = '$flagged';
     if (filters.mailboxId) filter.inMailbox = filters.mailboxId;
     if (filters.after) filter.after = filters.after;
     if (filters.before) filter.before = filters.before;
 
-    // If unread filter is specifically true, we need to check for absence of $seen
-    if (filters.isUnread === true) {
-      filter.notKeyword = '$seen';
+    // When both isUnread and isPinned are set, hasKeyword/notKeyword may conflict.
+    // JMAP FilterCondition only supports one hasKeyword, so wrap in an AND operator.
+    let finalFilter: any = filter;
+    if (filters.isUnread !== undefined && filters.isPinned !== undefined) {
       delete filter.hasKeyword;
+      delete filter.notKeyword;
+      const conditions: any[] = [filter];
+      conditions.push(filters.isUnread ? { notKeyword: '$seen' } : { hasKeyword: '$seen' });
+      conditions.push(filters.isPinned ? { hasKeyword: '$flagged' } : { notKeyword: '$flagged' });
+      finalFilter = { operator: 'AND', conditions };
     }
 
     const request: JmapRequest = {
@@ -939,7 +975,7 @@ export class JmapClient {
       methodCalls: [
         ['Email/query', {
           accountId: session.accountId,
-          filter,
+          filter: finalFilter,
           sort: [{ property: 'receivedAt', isAscending: false }],
           limit: Math.min(filters.limit || 50, 100)
         }, 'query'],
@@ -1121,6 +1157,34 @@ export class JmapClient {
     
     if (result.notUpdated && Object.keys(result.notUpdated).length > 0) {
       throw new Error('Failed to update some emails.');
+    }
+  }
+
+  async bulkPinEmails(emailIds: string[], pinned: boolean = true): Promise<void> {
+    const session = await this.getSession();
+
+    const updates: Record<string, any> = {};
+    emailIds.forEach(id => {
+      updates[id] = pinned
+        ? { 'keywords/$flagged': true }
+        : { 'keywords/$flagged': null };
+    });
+
+    const request: JmapRequest = {
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
+      methodCalls: [
+        ['Email/set', {
+          accountId: session.accountId,
+          update: updates
+        }, 'bulkFlag']
+      ]
+    };
+
+    const response = await this.makeRequest(request);
+    const result = this.getMethodResult(response, 0);
+
+    if (result.notUpdated && Object.keys(result.notUpdated).length > 0) {
+      throw new Error('Failed to pin/unpin some emails.');
     }
   }
 
