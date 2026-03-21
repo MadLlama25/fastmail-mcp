@@ -15,7 +15,7 @@ import { CalDAVCalendarClient } from './caldav-client.js';
 const server = new Server(
   {
     name: 'fastmail-mcp',
-    version: '1.7.1',
+    version: '1.8.0',
   },
   {
     capabilities: {
