@@ -569,13 +569,7 @@ export class JmapClient {
     };
 
     const response = await this.makeRequest(request);
-
-    if (response.methodResponses[0][0] === 'error') {
-      const err = response.methodResponses[0][1];
-      throw new Error(`JMAP error: ${err.type}${err.description ? ' - ' + err.description : ''}`);
-    }
-
-    const result = response.methodResponses[0][1];
+    const result = this.getMethodResult(response, 0);
 
     if (result.notCreated?.draft) {
       const err = result.notCreated.draft;
@@ -678,13 +672,7 @@ export class JmapClient {
     };
 
     const response = await this.makeRequest(request);
-
-    if (response.methodResponses[0][0] === 'error') {
-      const err = response.methodResponses[0][1];
-      throw new Error(`JMAP error submitting draft: ${err.type}${err.description ? ' - ' + err.description : ''}`);
-    }
-
-    const submissionResult = response.methodResponses[0][1];
+    const submissionResult = this.getMethodResult(response, 0);
     if (submissionResult.notCreated?.submission) {
       const err = submissionResult.notCreated.submission;
       throw new Error(`Failed to submit draft: ${err.type}${err.description ? ' - ' + err.description : ''}`);
