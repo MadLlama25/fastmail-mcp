@@ -15,7 +15,7 @@ import { CalDAVCalendarClient } from './caldav-client.js';
 const server = new Server(
   {
     name: 'fastmail-mcp',
-    version: '1.8.0',
+    version: '1.8.1',
   },
   {
     capabilities: {
@@ -1483,7 +1483,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             };
           }
         } catch (error) {
-          // Sanitize error to avoid leaking attachment metadata
+          // Let path validation errors through so users see why their savePath was rejected
+          if (error instanceof Error && (error.message.includes('Save path') || error.message.includes('null bytes'))) {
+            throw new McpError(ErrorCode.InvalidParams, error.message);
+          }
+          // Sanitize other errors to avoid leaking attachment metadata
           throw new McpError(
             ErrorCode.InternalError,
             'Attachment download failed. Verify emailId and attachmentId and try again.'
