@@ -7,3 +7,4 @@ dist/
 *.tsbuildinfo
 CLAUDE.md
 *.dxt
+test-live*.sh
