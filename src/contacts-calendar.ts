@@ -25,13 +25,13 @@ export class ContactsCalendarClient extends JmapClient {
     const request: JmapRequest = {
       using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:contacts'],
       methodCalls: [
-        ['Contact/query', {
+        ['ContactCard/query', {
           accountId: session.accountId,
           limit
         }, 'query'],
-        ['Contact/get', {
+        ['ContactCard/get', {
           accountId: session.accountId,
-          '#ids': { resultOf: 'query', name: 'Contact/query', path: '/ids' },
+          '#ids': { resultOf: 'query', name: 'ContactCard/query', path: '/ids' },
           properties: ['id', 'name', 'emails', 'phones', 'addresses', 'notes']
         }, 'contacts']
       ]
@@ -72,7 +72,7 @@ export class ContactsCalendarClient extends JmapClient {
     const request: JmapRequest = {
       using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:contacts'],
       methodCalls: [
-        ['Contact/get', {
+        ['ContactCard/get', {
           accountId: session.accountId,
           ids: [id]
         }, 'contact']
@@ -99,14 +99,14 @@ export class ContactsCalendarClient extends JmapClient {
     const request: JmapRequest = {
       using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:contacts'],
       methodCalls: [
-        ['Contact/query', {
+        ['ContactCard/query', {
           accountId: session.accountId,
           filter: { text: query },
           limit
         }, 'query'],
-        ['Contact/get', {
+        ['ContactCard/get', {
           accountId: session.accountId,
-          '#ids': { resultOf: 'query', name: 'Contact/query', path: '/ids' },
+          '#ids': { resultOf: 'query', name: 'ContactCard/query', path: '/ids' },
           properties: ['id', 'name', 'emails', 'phones', 'addresses', 'notes']
         }, 'contacts']
       ]
