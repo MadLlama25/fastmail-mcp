@@ -170,7 +170,7 @@ export class JmapClient {
         ['Email/get', {
           accountId: session.accountId,
           ids: [id],
-          properties: ['id', 'subject', 'from', 'to', 'cc', 'bcc', 'receivedAt', 'textBody', 'htmlBody', 'attachments', 'bodyValues', 'messageId', 'threadId', 'inReplyTo', 'references'],
+          properties: ['id', 'subject', 'from', 'to', 'cc', 'bcc', 'receivedAt', 'textBody', 'htmlBody', 'attachments', 'bodyValues', 'messageId', 'threadId', 'inReplyTo', 'references', 'keywords', 'header:List-Unsubscribe:asURLs'],
           bodyProperties: ['partId', 'blobId', 'type', 'size'],
           fetchTextBodyValues: true,
           fetchHTMLBodyValues: true,
@@ -717,7 +717,7 @@ export class JmapClient {
         ['Email/get', {
           accountId: session.accountId,
           '#ids': { resultOf: 'query', name: 'Email/query', path: '/ids' },
-          properties: ['id', 'subject', 'from', 'to', 'receivedAt', 'preview', 'hasAttachment', 'keywords']
+          properties: ['id', 'subject', 'from', 'to', 'receivedAt', 'preview', 'hasAttachment', 'keywords', 'header:List-Unsubscribe:asURLs']
         }, 'emails']
       ]
     };
