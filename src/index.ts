@@ -450,6 +450,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: 'string',
               description: 'ID of the calendar (optional, defaults to all calendars)',
             },
+            startDate: {
+              type: 'string',
+              description: 'Filter events starting from this date (ISO 8601, e.g. 2026-03-23T00:00:00Z)',
+            },
+            endDate: {
+              type: 'string',
+              description: 'Filter events ending before this date (ISO 8601, e.g. 2026-03-30T00:00:00Z)',
+            },
             limit: {
               type: 'number',
               description: 'Maximum number of events to return (default: 50)',
@@ -1244,7 +1252,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'list_calendar_events': {
-        const { calendarId, limit = 50 } = args as any;
+        const { calendarId, limit = 50, startDate, endDate } = args as any;
         try {
           const contactsClient = initializeContactsCalendarClient();
           const events = await contactsClient.getCalendarEvents(calendarId, limit);
@@ -1254,7 +1262,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           if (!davClient) {
             throw new McpError(ErrorCode.InvalidRequest, 'JMAP calendars not available and CalDAV not configured. Set FASTMAIL_CALDAV_USERNAME and FASTMAIL_CALDAV_PASSWORD to use CalDAV.');
           }
-          const events = await davClient.getCalendarEvents(calendarId, limit);
+          const events = await davClient.getCalendarEvents(calendarId, limit, startDate, endDate);
           return { content: [{ type: 'text', text: JSON.stringify(events, null, 2) }] };
         }
       }
