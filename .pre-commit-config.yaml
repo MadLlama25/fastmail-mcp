@@ -1,0 +1,48 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-merge-conflict
+      - id: no-commit-to-branch
+        args: [--branch, main]
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: detect-private-key
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.0
+    hooks:
+      - id: gitleaks
+
+  - repo: local
+    hooks:
+      - id: semgrep
+        name: semgrep SAST
+        entry: semgrep scan --config auto --error --quiet --exclude 'coverage' --exclude 'node_modules' --exclude 'dist'
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]
+
+      - id: biome-check
+        name: biome check
+        entry: npx biome check --write --no-errors-on-unmatched
+        language: system
+        types_or: [javascript, jsx, ts, tsx, json]
+        stages: [pre-commit]
+
+      - id: typecheck
+        name: typescript typecheck
+        entry: npx tsc --noEmit
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+
+      - id: test
+        name: tests
+        entry: npx tsx --test src/**/*.test.ts
+        language: system
+        pass_filenames: false
+        stages: [pre-push]

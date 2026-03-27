@@ -8,3 +8,5 @@ dist/
 CLAUDE.md
 *.dxt
 test-live*.sh
+coverage/
+.c8_output/

@@ -1,9 +1,67 @@
-import { describe, it, beforeEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
-import { homedir } from 'os';
-import { resolve } from 'path';
-import { JmapClient } from './jmap-client.js';
+import { homedir } from 'node:os';
+import { resolve } from 'node:path';
+import { beforeEach, describe, it, mock } from 'node:test';
 import { FastmailAuth } from './auth.js';
+import { JmapClient, type JmapRequest } from './jmap-client.js';
+
+// ---------- FastmailAuth ----------
+
+describe('FastmailAuth', () => {
+  it('returns correct auth headers', () => {
+    const auth = new FastmailAuth({ apiToken: 'test-token-123' });
+    const headers = auth.getAuthHeaders();
+    assert.equal(headers.Authorization, 'Bearer test-token-123');
+    assert.equal(headers['Content-Type'], 'application/json');
+  });
+
+  it('returns correct session URL with default base', () => {
+    const auth = new FastmailAuth({ apiToken: 'tok' });
+    assert.equal(auth.getSessionUrl(), 'https://api.fastmail.com/jmap/session');
+  });
+
+  it('returns correct API URL with default base', () => {
+    const auth = new FastmailAuth({ apiToken: 'tok' });
+    assert.equal(auth.getApiUrl(), 'https://api.fastmail.com/jmap/api/');
+  });
+
+  it('normalizes custom base URL', () => {
+    const auth = new FastmailAuth({ apiToken: 'tok', baseUrl: 'https://custom.example.com/' });
+    assert.equal(auth.getSessionUrl(), 'https://custom.example.com/jmap/session');
+    assert.equal(auth.getApiUrl(), 'https://custom.example.com/jmap/api/');
+  });
+
+  it('adds https:// when protocol is missing', () => {
+    const auth = new FastmailAuth({ apiToken: 'tok', baseUrl: 'custom.example.com' });
+    assert.equal(auth.getSessionUrl(), 'https://custom.example.com/jmap/session');
+  });
+
+  it('handles empty base URL string', () => {
+    const auth = new FastmailAuth({ apiToken: 'tok', baseUrl: '  ' });
+    assert.equal(auth.getSessionUrl(), 'https://api.fastmail.com/jmap/session');
+  });
+
+  it('rejects http:// URLs', () => {
+    assert.throws(
+      () => new FastmailAuth({ apiToken: 'tok', baseUrl: 'http://evil.example.com' }),
+      /HTTPS is required/,
+    );
+  });
+
+  it('rejects http:// with mixed case', () => {
+    assert.throws(
+      () => new FastmailAuth({ apiToken: 'tok', baseUrl: 'HTTP://evil.example.com' }),
+      /HTTPS is required/,
+    );
+  });
+
+  it('rejects non-HTTPS schemes like ftp://', () => {
+    assert.throws(
+      () => new FastmailAuth({ apiToken: 'tok', baseUrl: 'ftp://evil.example.com' }),
+      /HTTPS is required/,
+    );
+  });
+});
 
 // ---------- helpers ----------
 
@@ -29,7 +87,7 @@ function makeClient(): JmapClient {
   return client;
 }
 
-function stubMakeRequest(client: JmapClient, response: any) {
+function stubMakeRequest(client: JmapClient, response: Record<string, unknown>) {
   mock.method(client, 'makeRequest', async () => response);
 }
 
@@ -45,9 +103,7 @@ describe('createDraft', () => {
   // 1. Happy path
   it('returns email ID on success', async () => {
     stubMakeRequest(client, {
-      methodResponses: [
-        ['Email/set', { created: { draft: { id: 'email-42' } } }, 'createDraft'],
-      ],
+      methodResponses: [['Email/set', { created: { draft: { id: 'email-42' } } }, 'createDraft']],
     });
 
     const id = await client.createDraft({ subject: 'Hello' });
@@ -57,9 +113,7 @@ describe('createDraft', () => {
   // 2. Correct JMAP request structure
   it('sends correct JMAP request structure', async () => {
     const makeReq = mock.method(client, 'makeRequest', async () => ({
-      methodResponses: [
-        ['Email/set', { created: { draft: { id: 'email-1' } } }, 'createDraft'],
-      ],
+      methodResponses: [['Email/set', { created: { draft: { id: 'email-1' } } }, 'createDraft']],
     }));
 
     await client.createDraft({ subject: 'Test', textBody: 'body' });
@@ -68,10 +122,7 @@ describe('createDraft', () => {
     const request = makeReq.mock.calls[0].arguments[0];
 
     // capabilities
-    assert.deepEqual(request.using, [
-      'urn:ietf:params:jmap:core',
-      'urn:ietf:params:jmap:mail',
-    ]);
+    assert.deepEqual(request.using, ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail']);
 
     // method
     assert.equal(request.methodCalls[0][0], 'Email/set');
@@ -134,9 +185,7 @@ describe('createDraft', () => {
   // 5. Bug 3 regression — missing created.draft.id throws
   it('throws when created.draft.id is missing', async () => {
     stubMakeRequest(client, {
-      methodResponses: [
-        ['Email/set', { created: { draft: {} } }, 'createDraft'],
-      ],
+      methodResponses: [['Email/set', { created: { draft: {} } }, 'createDraft']],
     });
 
     await assert.rejects(
@@ -165,9 +214,7 @@ describe('createDraft', () => {
     mock.method(client, 'getIdentities', async () => [IDENTITY, altIdentity]);
 
     const makeReq = mock.method(client, 'makeRequest', async () => ({
-      methodResponses: [
-        ['Email/set', { created: { draft: { id: 'email-7' } } }, 'createDraft'],
-      ],
+      methodResponses: [['Email/set', { created: { draft: { id: 'email-7' } } }, 'createDraft']],
     }));
 
     await client.createDraft({ subject: 'Hi', from: 'alias@example.com' });
@@ -192,9 +239,7 @@ describe('createDraft', () => {
     const getMailboxes = client.getMailboxes as ReturnType<typeof mock.method>;
 
     const makeReq = mock.method(client, 'makeRequest', async () => ({
-      methodResponses: [
-        ['Email/set', { created: { draft: { id: 'email-9' } } }, 'createDraft'],
-      ],
+      methodResponses: [['Email/set', { created: { draft: { id: 'email-9' } } }, 'createDraft']],
     }));
 
     await client.createDraft({ subject: 'Custom', mailboxId: 'mb-custom' });
@@ -209,9 +254,7 @@ describe('createDraft', () => {
   // 10. HTML body constructed correctly
   it('constructs HTML body parts correctly', async () => {
     const makeReq = mock.method(client, 'makeRequest', async () => ({
-      methodResponses: [
-        ['Email/set', { created: { draft: { id: 'email-10' } } }, 'createDraft'],
-      ],
+      methodResponses: [['Email/set', { created: { draft: { id: 'email-10' } } }, 'createDraft']],
     }));
 
     await client.createDraft({ subject: 'Rich', htmlBody: '<p>Hello</p>' });
@@ -247,13 +290,21 @@ describe('updateDraft', () => {
   });
 
   it('returns new email ID on success', async () => {
-    const makeReq = mock.method(client, 'makeRequest', async (req: any) => {
+    const makeReq = mock.method(client, 'makeRequest', async (req: JmapRequest) => {
       // First call: Email/get to fetch existing draft
       if (req.methodCalls[0][0] === 'Email/get') {
         return { methodResponses: [['Email/get', { list: [EXISTING_DRAFT] }, 'getEmail']] };
       }
       // Second call: Email/set with create+destroy
-      return { methodResponses: [['Email/set', { created: { draft: { id: 'draft-2' } }, destroyed: ['draft-1'] }, 'updateDraft']] };
+      return {
+        methodResponses: [
+          [
+            'Email/set',
+            { created: { draft: { id: 'draft-2' } }, destroyed: ['draft-1'] },
+            'updateDraft',
+          ],
+        ],
+      };
     });
 
     const newId = await client.updateDraft('draft-1', { subject: 'New Subject' });
@@ -267,11 +318,19 @@ describe('updateDraft', () => {
   });
 
   it('merges fields — preserves existing values for unspecified fields', async () => {
-    mock.method(client, 'makeRequest', async (req: any) => {
+    mock.method(client, 'makeRequest', async (req: JmapRequest) => {
       if (req.methodCalls[0][0] === 'Email/get') {
         return { methodResponses: [['Email/get', { list: [EXISTING_DRAFT] }, 'getEmail']] };
       }
-      return { methodResponses: [['Email/set', { created: { draft: { id: 'draft-2' } }, destroyed: ['draft-1'] }, 'updateDraft']] };
+      return {
+        methodResponses: [
+          [
+            'Email/set',
+            { created: { draft: { id: 'draft-2' } }, destroyed: ['draft-1'] },
+            'updateDraft',
+          ],
+        ],
+      };
     });
 
     await client.updateDraft('draft-1', { subject: 'Updated' });
@@ -313,11 +372,13 @@ describe('updateDraft', () => {
   });
 
   it('throws on JMAP error during create+destroy', async () => {
-    mock.method(client, 'makeRequest', async (req: any) => {
+    mock.method(client, 'makeRequest', async (req: JmapRequest) => {
       if (req.methodCalls[0][0] === 'Email/get') {
         return { methodResponses: [['Email/get', { list: [EXISTING_DRAFT] }, 'getEmail']] };
       }
-      return { methodResponses: [['error', { type: 'serverFail', description: 'oops' }, 'updateDraft']] };
+      return {
+        methodResponses: [['error', { type: 'serverFail', description: 'oops' }, 'updateDraft']],
+      };
     });
 
     await assert.rejects(
@@ -352,11 +413,15 @@ describe('sendDraft', () => {
   });
 
   it('returns submission ID on success', async () => {
-    const makeReq = mock.method(client, 'makeRequest', async (req: any) => {
+    const makeReq = mock.method(client, 'makeRequest', async (req: JmapRequest) => {
       if (req.methodCalls[0][0] === 'Email/get') {
         return { methodResponses: [['Email/get', { list: [SENDABLE_DRAFT] }, 'getEmail']] };
       }
-      return { methodResponses: [['EmailSubmission/set', { created: { submission: { id: 'sub-1' } } }, 'submitDraft']] };
+      return {
+        methodResponses: [
+          ['EmailSubmission/set', { created: { submission: { id: 'sub-1' } } }, 'submitDraft'],
+        ],
+      };
     });
 
     const subId = await client.sendDraft('draft-1');
@@ -420,11 +485,15 @@ describe('sendDraft', () => {
   });
 
   it('throws on JMAP submission error', async () => {
-    mock.method(client, 'makeRequest', async (req: any) => {
+    mock.method(client, 'makeRequest', async (req: JmapRequest) => {
       if (req.methodCalls[0][0] === 'Email/get') {
         return { methodResponses: [['Email/get', { list: [SENDABLE_DRAFT] }, 'getEmail']] };
       }
-      return { methodResponses: [['error', { type: 'forbidden', description: 'not allowed' }, 'submitDraft']] };
+      return {
+        methodResponses: [
+          ['error', { type: 'forbidden', description: 'not allowed' }, 'submitDraft'],
+        ],
+      };
     });
 
     await assert.rejects(
@@ -459,9 +528,7 @@ describe('JMAP response validation', () => {
 
   it('throws when index exceeds methodResponses length', async () => {
     stubMakeRequest(client, {
-      methodResponses: [
-        ['error', { type: 'serverFail', description: 'oops' }, 'query'],
-      ],
+      methodResponses: [['error', { type: 'serverFail', description: 'oops' }, 'query']],
     });
     // getEmails uses getListResult(response, 1) but only 1 response exists
     await assert.rejects(
@@ -475,7 +542,7 @@ describe('JMAP response validation', () => {
 
   it('throws on malformed methodResponses entry', async () => {
     stubMakeRequest(client, {
-      methodResponses: ['not-a-tuple' as any],
+      methodResponses: ['not-a-tuple' as unknown],
     });
     await assert.rejects(
       () => client.getEmailById('email-1'),

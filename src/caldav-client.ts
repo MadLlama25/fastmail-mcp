@@ -1,4 +1,4 @@
-import { DAVClient, DAVCalendar, DAVCalendarObject } from 'tsdav';
+import { type DAVCalendar, type DAVCalendarObject, DAVClient } from 'tsdav';
 
 export interface CalDAVConfig {
   username: string;
@@ -40,15 +40,19 @@ export function extractVEvent(data: string): string {
  * Also handles line folding (continuation lines starting with space/tab).
  */
 export function parseICalValue(vevent: string, key: string): string | undefined {
-  // Match KEY followed by either ; (params) or : (value), capturing the rest
-  const regex = new RegExp(`^(${key}[;:].*)$`, 'm');
-  const match = vevent.match(regex);
-  if (!match) return undefined;
+  // Find the line starting with KEY followed by ; (params) or : (value)
+  const lines = vevent.split(/\r?\n/);
+  let matchIdx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].startsWith(`${key};`) || lines[i].startsWith(`${key}:`)) {
+      matchIdx = i;
+      break;
+    }
+  }
+  if (matchIdx === -1) return undefined;
 
   // Handle line folding: continuation lines start with space or tab
-  let fullLine = match[1];
-  const lines = vevent.split(/\r?\n/);
-  const matchIdx = lines.findIndex(l => l === fullLine || l.startsWith(fullLine));
+  let fullLine = lines[matchIdx];
   if (matchIdx >= 0) {
     for (let i = matchIdx + 1; i < lines.length; i++) {
       if (lines[i].startsWith(' ') || lines[i].startsWith('\t')) {
@@ -94,7 +98,8 @@ export function formatICalDate(raw: string | undefined): string | undefined {
 
 export function parseCalendarObject(obj: DAVCalendarObject): CalendarEvent {
   const vevent = extractVEvent(obj.data || '');
-  const title = parseICalValue(vevent, 'SUMMARY') || 'Untitled';
+  const rawTitle = parseICalValue(vevent, 'SUMMARY');
+  const title = rawTitle ? unescapeICalText(rawTitle) : 'Untitled';
   const description = parseICalValue(vevent, 'DESCRIPTION');
   const rawStart = parseICalValue(vevent, 'DTSTART');
   const rawEnd = parseICalValue(vevent, 'DTEND');
@@ -105,11 +110,29 @@ export function parseCalendarObject(obj: DAVCalendarObject): CalendarEvent {
     id: uid,
     url: obj.url || '',
     title,
-    description: description?.replace(/\\n/g, '\n').replace(/\\,/g, ',') || undefined,
+    description: description ? unescapeICalText(description) : undefined,
     start: formatICalDate(rawStart),
     end: formatICalDate(rawEnd),
-    location: location?.replace(/\\,/g, ',') || undefined,
+    location: location ? unescapeICalText(location) : undefined,
   };
+}
+
+/** Unescape iCalendar property values per RFC 5545 Section 3.3.11 */
+export function unescapeICalText(text: string): string {
+  return text
+    .replace(/\\n/g, '\n')
+    .replace(/\\,/g, ',')
+    .replace(/\\;/g, ';')
+    .replace(/\\\\/g, '\\');
+}
+
+/** Escape text for iCalendar property values per RFC 5545 Section 3.3.11 */
+export function escapeICalText(text: string): string {
+  return text
+    .replace(/\\/g, '\\\\')
+    .replace(/;/g, '\\;')
+    .replace(/,/g, '\\,')
+    .replace(/\r\n|\r|\n/g, '\\n');
 }
 
 export class CalDAVCalendarClient {
@@ -118,6 +141,11 @@ export class CalDAVCalendarClient {
   private calendars: DAVCalendar[] | null = null;
 
   constructor(config: CalDAVConfig) {
+    if (config.serverUrl && !/^https:\/\//i.test(config.serverUrl)) {
+      throw new Error(
+        'HTTPS is required for CalDAV server URL. Refusing to send credentials over non-HTTPS transport.',
+      );
+    }
     this.config = config;
   }
 
@@ -144,17 +172,17 @@ export class CalDAVCalendarClient {
     this.calendars = calendars;
 
     return calendars
-      .filter(c => c.displayName !== 'DEFAULT_TASK_CALENDAR_NAME')
-      .map(c => ({
+      .filter((c) => c.displayName !== 'DEFAULT_TASK_CALENDAR_NAME')
+      .map((c) => ({
         id: c.url || '',
         displayName: String(c.displayName || 'Unnamed'),
         url: c.url || '',
         description: c.description || undefined,
-        color: (c as any).calendarColor || undefined,
+        color: c.calendarColor || undefined,
       }));
   }
 
-  async getCalendarEvents(calendarId?: string, limit: number = 50): Promise<CalendarEvent[]> {
+  async getCalendarEvents(calendarId?: string, limit = 50): Promise<CalendarEvent[]> {
     const client = await this.getClient();
 
     if (!this.calendars) {
@@ -162,11 +190,11 @@ export class CalDAVCalendarClient {
     }
 
     let targetCalendars = this.calendars.filter(
-      c => c.displayName !== 'DEFAULT_TASK_CALENDAR_NAME'
+      (c) => c.displayName !== 'DEFAULT_TASK_CALENDAR_NAME',
     );
     if (calendarId) {
       targetCalendars = targetCalendars.filter(
-        c => c.url === calendarId || c.displayName === calendarId
+        (c) => c.url === calendarId || c.displayName === calendarId,
       );
     }
 
@@ -218,14 +246,17 @@ export class CalDAVCalendarClient {
     }
 
     const targetCal = this.calendars.find(
-      c => c.url === event.calendarId || c.displayName === event.calendarId
+      (c) => c.url === event.calendarId || c.displayName === event.calendarId,
     );
     if (!targetCal) {
       throw new Error(`Calendar not found: ${event.calendarId}`);
     }
 
     const uid = `${Date.now()}-${Math.random().toString(36).slice(2)}@fastmail-mcp`;
-    const now = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+    const now = new Date()
+      .toISOString()
+      .replace(/[-:]/g, '')
+      .replace(/\.\d{3}/, '');
     const ical = [
       'BEGIN:VCALENDAR',
       'VERSION:2.0',
@@ -235,12 +266,14 @@ export class CalDAVCalendarClient {
       `DTSTAMP:${now}`,
       `DTSTART:${event.start.replace(/[-:]/g, '')}`,
       `DTEND:${event.end.replace(/[-:]/g, '')}`,
-      `SUMMARY:${event.title}`,
-      event.description ? `DESCRIPTION:${event.description}` : '',
-      event.location ? `LOCATION:${event.location}` : '',
+      `SUMMARY:${escapeICalText(event.title)}`,
+      event.description ? `DESCRIPTION:${escapeICalText(event.description)}` : '',
+      event.location ? `LOCATION:${escapeICalText(event.location)}` : '',
       'END:VEVENT',
       'END:VCALENDAR',
-    ].filter(Boolean).join('\r\n');
+    ]
+      .filter(Boolean)
+      .join('\r\n');
 
     await client.createCalendarObject({
       calendar: targetCal,

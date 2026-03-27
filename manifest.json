@@ -11,9 +11,7 @@
     "entry_point": "dist/index.js",
     "mcp_config": {
       "command": "node",
-      "args": [
-        "${__dirname}/dist/index.js"
-      ],
+      "args": ["${__dirname}/dist/index.js"],
       "env": {
         "FASTMAIL_API_TOKEN": "${user_config.fastmail_api_token}",
         "FASTMAIL_BASE_URL": "${user_config.fastmail_base_url}"

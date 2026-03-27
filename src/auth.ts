@@ -9,7 +9,12 @@ function normalizeBaseUrl(input?: string): string {
   let url = input.trim();
   if (!url) return DEFAULT;
   if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(url)) {
-    url = 'https://' + url;
+    url = `https://${url}`;
+  }
+  if (!/^https:\/\//i.test(url)) {
+    throw new Error(
+      'HTTPS is required for FASTMAIL_BASE_URL. Refusing to send credentials over non-HTTPS transport.',
+    );
   }
   url = url.replace(/\/+$/, '');
   return url;
@@ -26,8 +31,8 @@ export class FastmailAuth {
 
   getAuthHeaders(): Record<string, string> {
     return {
-      'Authorization': `Bearer ${this.apiToken}`,
-      'Content-Type': 'application/json'
+      Authorization: `Bearer ${this.apiToken}`,
+      'Content-Type': 'application/json',
     };
   }
 
