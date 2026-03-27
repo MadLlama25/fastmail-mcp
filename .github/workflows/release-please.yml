@@ -34,3 +34,18 @@ jobs:
           npm run check
           npm test
           npm run build
+
+      - name: Pack DXT
+        if: ${{ steps.release.outputs.release_created }}
+        run: npx --yes @anthropic-ai/dxt@0.2.6 pack
+
+      - name: Upload DXT to release
+        if: ${{ steps.release.outputs.release_created }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.release.outputs.tag_name }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          FILE=$(ls -1 *.dxt | head -n1)
+          mv "$FILE" "fastmail-mcp-$VERSION.dxt"
+          gh release upload "$TAG" "fastmail-mcp-$VERSION.dxt"

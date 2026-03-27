@@ -1,6 +1,6 @@
 # Fastmail MCP Server
-[![CI](https://github.com/MadLlama25/fastmail-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/MadLlama25/fastmail-mcp/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/MadLlama25/fastmail-mcp/graph/badge.svg)](https://codecov.io/gh/MadLlama25/fastmail-mcp)
+[![CI](https://github.com/dreamiurg/fastmail-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/dreamiurg/fastmail-mcp/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/dreamiurg/fastmail-mcp/graph/badge.svg)](https://codecov.io/gh/dreamiurg/fastmail-mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![npm](https://img.shields.io/npm/v/fastmail-mcp)](https://www.npmjs.com/package/fastmail-mcp)
 
@@ -33,19 +33,19 @@ npx fastmail-mcp
 ### From GitHub
 
 ```bash
-npx --yes github:MadLlama25/fastmail-mcp fastmail-mcp
+npx --yes github:dreamiurg/fastmail-mcp fastmail-mcp
 ```
 
 Pin to a tagged release:
 
 ```bash
-npx --yes github:MadLlama25/fastmail-mcp@v1.8.2 fastmail-mcp
+npx --yes github:dreamiurg/fastmail-mcp@v1.8.2 fastmail-mcp
 ```
 
 ### From source
 
 ```bash
-git clone https://github.com/MadLlama25/fastmail-mcp.git
+git clone https://github.com/dreamiurg/fastmail-mcp.git
 cd fastmail-mcp
 npm install
 npm run build

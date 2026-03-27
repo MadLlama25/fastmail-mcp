@@ -1,17 +1,14 @@
-name: Build and Release DXT
+name: Build DXT (manual)
 
 on:
   workflow_dispatch:
-  push:
-    tags:
-      - 'v*'
 
 permissions: {}
 
 jobs:
   build:
     permissions:
-      contents: write
+      contents: read
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -45,10 +42,3 @@ jobs:
         with:
           name: fastmail-mcp-dxt
           path: ${{ env.DXT_FILE }}
-
-      - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.ref_name }}
-        run: gh release create "$TAG" "${{ env.DXT_FILE }}" --generate-notes
