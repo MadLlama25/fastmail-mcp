@@ -1,6 +1,6 @@
 {
   "name": "fastmail-mcp",
-  "version": "1.8.2",
+  "version": "1.0.0",
   "description": "MCP server for Fastmail API integration",
   "main": "dist/index.js",
   "type": "module",
@@ -23,7 +23,12 @@
   "engines": {
     "node": ">=18"
   },
-  "keywords": ["mcp", "fastmail", "email", "jmap"],
+  "keywords": [
+    "mcp",
+    "fastmail",
+    "email",
+    "jmap"
+  ],
   "author": "Jeremy Gill",
   "license": "MIT",
   "dependencies": {
@@ -43,8 +48,16 @@
     "functions": 80,
     "branches": 80,
     "statements": 80,
-    "reporter": ["text", "lcov", "html"],
-    "include": ["src/**/*.ts"],
-    "exclude": ["src/**/*.test.ts"]
+    "reporter": [
+      "text",
+      "lcov",
+      "html"
+    ],
+    "include": [
+      "src/**/*.ts"
+    ],
+    "exclude": [
+      "src/**/*.test.ts"
+    ]
   }
 }
