@@ -15,7 +15,7 @@ import { JmapClient } from './jmap-client.js';
 const server = new Server(
   {
     name: 'fastmail-mcp',
-    version: '1.8.2',
+    version: '1.9.0',
   },
   {
     capabilities: {

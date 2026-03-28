@@ -39,7 +39,7 @@ npx --yes github:dreamiurg/fastmail-mcp fastmail-mcp
 Pin to a tagged release:
 
 ```bash
-npx --yes github:dreamiurg/fastmail-mcp@v1.8.2 fastmail-mcp
+npx --yes github:dreamiurg/fastmail-mcp@v1.9.0 fastmail-mcp
 ```
 
 ### From source
