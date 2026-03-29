@@ -278,7 +278,12 @@ export class JmapClient {
     return this.getListResult(response, 0) as JmapMailbox[];
   }
 
-  async getEmails(mailboxId?: string, limit = 20): Promise<JmapEmail[]> {
+  async getEmails(
+    mailboxId?: string,
+    limit = 20,
+    sortAscending = false,
+    position = 0,
+  ): Promise<JmapEmail[]> {
     const session = await this.getSession();
 
     const filter = mailboxId ? { inMailbox: mailboxId } : {};
@@ -291,8 +296,9 @@ export class JmapClient {
           {
             accountId: session.accountId,
             filter,
-            sort: [{ property: 'receivedAt', isAscending: false }],
+            sort: [{ property: 'receivedAt', isAscending: sortAscending }],
             limit,
+            ...(position > 0 && { position }),
           },
           'query',
         ],
@@ -1403,6 +1409,21 @@ export class JmapClient {
   }
 
   /**
+   * Normalize a date string to JMAP UTCDate format (RFC 3339).
+   * Accepts "2015-01-01" or "2015-01-01T00:00:00Z" and ensures the result
+   * always has a time component and Z suffix.
+   */
+  private static normalizeUtcDate(date: string): string {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return `${date}T00:00:00Z`;
+    }
+    if (/^\d{4}-\d{2}-\d{2}T/.test(date) && !date.endsWith('Z') && !/[+-]\d{2}:\d{2}$/.test(date)) {
+      return `${date}Z`;
+    }
+    return date;
+  }
+
+  /**
    * Apply keyword-based filters (isUnread, isPinned) to a JMAP email filter.
    * When both are set, wraps in an AND operator to avoid hasKeyword/notKeyword conflicts.
    */
@@ -1449,8 +1470,8 @@ export class JmapClient {
     if (filters.subject) filter.subject = filters.subject;
     if (filters.hasAttachment !== undefined) filter.hasAttachment = filters.hasAttachment;
     if (filters.mailboxId) filter.inMailbox = filters.mailboxId;
-    if (filters.after) filter.after = filters.after;
-    if (filters.before) filter.before = filters.before;
+    if (filters.after) filter.after = JmapClient.normalizeUtcDate(filters.after);
+    if (filters.before) filter.before = JmapClient.normalizeUtcDate(filters.before);
 
     return this.applyKeywordFilters(filter, filters.isUnread, filters.isPinned);
   }
@@ -1467,9 +1488,12 @@ export class JmapClient {
     after?: string;
     before?: string;
     limit?: number;
+    sortAscending?: boolean;
+    position?: number;
   }): Promise<JmapEmail[]> {
     const session = await this.getSession();
     const finalFilter = this.buildSearchFilter(filters);
+    const position = filters.position || 0;
 
     const request: JmapRequest = {
       using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
@@ -1479,8 +1503,9 @@ export class JmapClient {
           {
             accountId: session.accountId,
             filter: finalFilter,
-            sort: [{ property: 'receivedAt', isAscending: false }],
+            sort: [{ property: 'receivedAt', isAscending: filters.sortAscending ?? false }],
             limit: Math.min(filters.limit || 50, 100),
+            ...(position > 0 && { position }),
           },
           'query',
         ],
@@ -1508,10 +1533,17 @@ export class JmapClient {
     };
 
     const response = await this.makeRequest(request);
+    // Check Email/query result first to surface real errors instead of cascading invalidResultReference
+    this.getMethodResult(response, 0);
     return this.getListResult(response, 1) as JmapEmail[];
   }
 
-  async searchEmails(query: string, limit = 20): Promise<JmapEmail[]> {
+  async searchEmails(
+    query: string,
+    limit = 20,
+    sortAscending = false,
+    position = 0,
+  ): Promise<JmapEmail[]> {
     const session = await this.getSession();
 
     const request: JmapRequest = {
@@ -1522,8 +1554,9 @@ export class JmapClient {
           {
             accountId: session.accountId,
             filter: { text: query },
-            sort: [{ property: 'receivedAt', isAscending: false }],
+            sort: [{ property: 'receivedAt', isAscending: sortAscending }],
             limit,
+            ...(position > 0 && { position }),
           },
           'query',
         ],
@@ -1671,7 +1704,14 @@ export class JmapClient {
   async getAccountSummary(): Promise<Record<string, unknown>> {
     const session = await this.getSession();
     const mailboxes = await this.getMailboxes();
-    const identities = await this.getIdentities();
+
+    let identityCount: number | string;
+    try {
+      const identities = await this.getIdentities();
+      identityCount = identities.length;
+    } catch {
+      identityCount = 'unavailable (submission scope may not be enabled)';
+    }
 
     // Calculate totals
     const totals = mailboxes.reduce(
@@ -1687,7 +1727,7 @@ export class JmapClient {
     return {
       accountId: session.accountId,
       mailboxCount: mailboxes.length,
-      identityCount: identities.length,
+      identityCount,
       ...totals,
       mailboxes: mailboxes.map((mb) => ({
         id: mb.id,

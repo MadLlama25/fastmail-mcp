@@ -1056,8 +1056,8 @@ describe('advancedSearch', () => {
     assert.equal(filter.subject, 'meeting');
     assert.equal(filter.hasAttachment, true);
     assert.equal(filter.inMailbox, 'mb-inbox');
-    assert.equal(filter.after, '2026-01-01');
-    assert.equal(filter.before, '2026-12-31');
+    assert.equal(filter.after, '2026-01-01T00:00:00Z');
+    assert.equal(filter.before, '2026-12-31T00:00:00Z');
   });
 
   it('applies isUnread filter', async () => {

@@ -120,7 +120,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'list_emails',
-        description: 'List emails from a mailbox',
+        description: 'List emails from a mailbox with sorting and pagination',
         inputSchema: {
           type: 'object',
           properties: {
@@ -132,6 +132,18 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: 'number',
               description: 'Maximum number of emails to return (default: 20)',
               default: 20,
+            },
+            sort: {
+              type: 'string',
+              enum: ['newest', 'oldest'],
+              description: 'Sort order by date (default: newest)',
+              default: 'newest',
+            },
+            position: {
+              type: 'number',
+              description:
+                'Offset position for pagination (default: 0). Use with limit to page through results.',
+              default: 0,
             },
           },
         },
@@ -384,6 +396,17 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: 'number',
               description: 'Maximum number of results (default: 20)',
               default: 20,
+            },
+            sort: {
+              type: 'string',
+              enum: ['newest', 'oldest'],
+              description: 'Sort order by date (default: newest)',
+              default: 'newest',
+            },
+            position: {
+              type: 'number',
+              description: 'Offset position for pagination (default: 0)',
+              default: 0,
             },
           },
           required: ['query'],
@@ -706,7 +729,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'advanced_search',
-        description: 'Advanced email search with multiple criteria',
+        description:
+          'Advanced email search with multiple criteria, date filtering, sorting, and pagination',
         inputSchema: {
           type: 'object',
           properties: {
@@ -744,16 +768,29 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             after: {
               type: 'string',
-              description: 'Emails after this date (ISO 8601)',
+              description:
+                'Emails after this date (ISO 8601, e.g. "2020-01-01" or "2020-01-01T00:00:00Z")',
             },
             before: {
               type: 'string',
-              description: 'Emails before this date (ISO 8601)',
+              description:
+                'Emails before this date (ISO 8601, e.g. "2020-01-01" or "2020-01-01T00:00:00Z")',
             },
             limit: {
               type: 'number',
               description: 'Maximum results (default: 50)',
               default: 50,
+            },
+            sort: {
+              type: 'string',
+              enum: ['newest', 'oldest'],
+              description: 'Sort order by date (default: newest)',
+              default: 'newest',
+            },
+            position: {
+              type: 'number',
+              description: 'Offset position for pagination (default: 0)',
+              default: 0,
             },
           },
         },
@@ -980,9 +1017,16 @@ async function handleListMailboxes(client: JmapClient, _args: ToolArgs): Promise
 }
 
 async function handleListEmails(client: JmapClient, args: ToolArgs): Promise<ToolResult> {
-  const { mailboxId, limit } = args as Record<string, unknown>;
+  const { mailboxId, limit, sort, position } = args as Record<string, unknown>;
   const validLimit = Math.min(Math.max(Number(limit) || 20, 1), 50);
-  const emails = await client.getEmails(mailboxId as string | undefined, validLimit);
+  const sortAscending = sort === 'oldest';
+  const validPosition = Math.max(Number(position) || 0, 0);
+  const emails = await client.getEmails(
+    mailboxId as string | undefined,
+    validLimit,
+    sortAscending,
+    validPosition,
+  );
   return jsonResult(emails);
 }
 
@@ -1181,11 +1225,18 @@ async function handleSendDraft(client: JmapClient, args: ToolArgs): Promise<Tool
 }
 
 async function handleSearchEmails(client: JmapClient, args: ToolArgs): Promise<ToolResult> {
-  const { query, limit = 20 } = args as Record<string, unknown>;
+  const { query, limit = 20, sort, position } = args as Record<string, unknown>;
   if (!query) {
     throw new McpError(ErrorCode.InvalidParams, 'query is required');
   }
-  const emails = await client.searchEmails(query as string, limit as number);
+  const sortAscending = sort === 'oldest';
+  const validPosition = Math.max(Number(position) || 0, 0);
+  const emails = await client.searchEmails(
+    query as string,
+    limit as number,
+    sortAscending,
+    validPosition,
+  );
   return jsonResult(emails);
 }
 
@@ -1431,6 +1482,8 @@ async function handleAdvancedSearch(client: JmapClient, args: ToolArgs): Promise
     after,
     before,
     limit,
+    sort,
+    position,
   } = args as Record<string, unknown>;
   const emails = await client.advancedSearch({
     query: query as string | undefined,
@@ -1444,6 +1497,8 @@ async function handleAdvancedSearch(client: JmapClient, args: ToolArgs): Promise
     after: after as string | undefined,
     before: before as string | undefined,
     limit: limit as number | undefined,
+    sortAscending: sort === 'oldest',
+    position: Math.max(Number(position) || 0, 0),
   });
   return jsonResult(emails);
 }
