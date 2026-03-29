@@ -182,7 +182,12 @@ export class CalDAVCalendarClient {
       }));
   }
 
-  async getCalendarEvents(calendarId?: string, limit = 50): Promise<CalendarEvent[]> {
+  async getCalendarEvents(
+    calendarId?: string,
+    limit = 50,
+    startDate?: string,
+    endDate?: string,
+  ): Promise<CalendarEvent[]> {
     const client = await this.getClient();
 
     if (!this.calendars) {
@@ -198,14 +203,24 @@ export class CalDAVCalendarClient {
       );
     }
 
+    const timeRange =
+      startDate || endDate
+        ? { start: startDate || '1970-01-01T00:00:00Z', end: endDate || '2099-12-31T23:59:59Z' }
+        : undefined;
+
     const allEvents: CalendarEvent[] = [];
     for (const cal of targetCalendars) {
-      const objects = await client.fetchCalendarObjects({ calendar: cal });
+      const fetchOpts: Parameters<typeof client.fetchCalendarObjects>[0] = { calendar: cal };
+      if (timeRange) fetchOpts.timeRange = timeRange;
+      const objects = await client.fetchCalendarObjects(fetchOpts);
       for (const obj of objects) {
         allEvents.push(parseCalendarObject(obj));
       }
       if (allEvents.length >= limit) break;
     }
+
+    // Sort by start date ascending
+    allEvents.sort((a, b) => (a.start || '').localeCompare(b.start || ''));
 
     return allEvents.slice(0, limit);
   }

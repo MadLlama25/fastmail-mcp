@@ -663,3 +663,66 @@ describe('unescapeICalText', () => {
     assert.equal(unescapeICalText('No special chars'), 'No special chars');
   });
 });
+
+describe('CalDAVCalendarClient.getCalendarEvents', () => {
+  function makeIcal(uid: string, summary: string, dtstart: string): string {
+    return [
+      'BEGIN:VCALENDAR',
+      'BEGIN:VEVENT',
+      `UID:${uid}`,
+      `DTSTART:${dtstart}`,
+      `SUMMARY:${summary}`,
+      'END:VEVENT',
+      'END:VCALENDAR',
+    ].join('\r\n');
+  }
+
+  function createMockedClient(calendarObjects: Array<{ data: string; url: string }>) {
+    const client = new CalDAVCalendarClient({ username: 'test', password: 'test' });
+    // Override the private getClient method to return a mock DAVClient
+    const mockDAVClient = {
+      login: mock.fn(async () => {}),
+      fetchCalendars: mock.fn(async () => [{ displayName: 'Personal', url: '/cal/personal/' }]),
+      fetchCalendarObjects: mock.fn(async () => calendarObjects),
+    };
+    // biome-ignore lint/suspicious/noExplicitAny: override private field in test
+    (client as unknown as Record<string, unknown>).client = mockDAVClient;
+    return { client, mockDAVClient };
+  }
+
+  it('sorts events by start date ascending', async () => {
+    const objects = [
+      { data: makeIcal('c@fm', 'Evening', '20260325T200000Z'), url: '/c.ics' },
+      { data: makeIcal('a@fm', 'Morning', '20260325T080000Z'), url: '/a.ics' },
+      { data: makeIcal('b@fm', 'Afternoon', '20260325T140000Z'), url: '/b.ics' },
+    ];
+    const { client } = createMockedClient(objects);
+    const events = await client.getCalendarEvents(undefined, 50);
+
+    assert.equal(events.length, 3);
+    assert.equal(events[0].title, 'Morning');
+    assert.equal(events[1].title, 'Afternoon');
+    assert.equal(events[2].title, 'Evening');
+  });
+
+  it('passes timeRange to fetchCalendarObjects when startDate/endDate provided', async () => {
+    const objects = [{ data: makeIcal('a@fm', 'Event', '20260325T100000Z'), url: '/a.ics' }];
+    const { client, mockDAVClient } = createMockedClient(objects);
+    await client.getCalendarEvents(undefined, 50, '2026-03-25T00:00:00Z', '2026-03-26T00:00:00Z');
+
+    const callArgs = mockDAVClient.fetchCalendarObjects.mock.calls[0].arguments[0];
+    assert.deepEqual(callArgs.timeRange, {
+      start: '2026-03-25T00:00:00Z',
+      end: '2026-03-26T00:00:00Z',
+    });
+  });
+
+  it('does not pass timeRange when no dates provided', async () => {
+    const objects = [{ data: makeIcal('a@fm', 'Event', '20260325T100000Z'), url: '/a.ics' }];
+    const { client, mockDAVClient } = createMockedClient(objects);
+    await client.getCalendarEvents(undefined, 50);
+
+    const callArgs = mockDAVClient.fetchCalendarObjects.mock.calls[0].arguments[0];
+    assert.equal(callArgs.timeRange, undefined);
+  });
+});

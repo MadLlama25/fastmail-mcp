@@ -454,6 +454,16 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: 'string',
               description: 'ID of the calendar (optional, defaults to all calendars)',
             },
+            startDate: {
+              type: 'string',
+              description:
+                'Filter events starting from this date (ISO 8601, e.g. 2026-03-23T00:00:00Z)',
+            },
+            endDate: {
+              type: 'string',
+              description:
+                'Filter events ending before this date (ISO 8601, e.g. 2026-03-30T00:00:00Z)',
+            },
             limit: {
               type: 'number',
               description: 'Maximum number of events to return (default: 50)',
@@ -1220,7 +1230,7 @@ async function handleListCalendars(_client: JmapClient, _args: ToolArgs): Promis
 }
 
 async function handleListCalendarEvents(_client: JmapClient, args: ToolArgs): Promise<ToolResult> {
-  const { calendarId, limit = 50 } = args as Record<string, unknown>;
+  const { calendarId, limit = 50, startDate, endDate } = args as Record<string, unknown>;
   try {
     const contactsClient = initializeContactsCalendarClient();
     const events = await contactsClient.getCalendarEvents(
@@ -1233,6 +1243,8 @@ async function handleListCalendarEvents(_client: JmapClient, args: ToolArgs): Pr
     const events = await davClient.getCalendarEvents(
       calendarId as string | undefined,
       limit as number,
+      startDate as string | undefined,
+      endDate as string | undefined,
     );
     return jsonResult(events);
   }
