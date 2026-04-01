@@ -204,6 +204,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               items: { type: 'string' },
               description: 'Full reference chain of Message-IDs (optional, for threading)',
             },
+            replyTo: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Reply-To email addresses (replies go here instead of to the sender)',
+            },
           },
           required: ['to', 'subject'],
         },
@@ -248,6 +253,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             send: {
               type: 'boolean',
               description: 'Whether to send the reply immediately (default: true). Set to false to save as draft instead.',
+            },
+            replyTo: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Reply-To email addresses (replies go here instead of to the sender)',
             },
           },
           required: ['originalEmailId'],
@@ -304,6 +314,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               items: { type: 'string' },
               description: 'Message-IDs for References header (optional, for threading)',
             },
+            replyTo: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Reply-To email addresses (replies go here instead of to the sender)',
+            },
           },
         },
       },
@@ -347,6 +362,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             htmlBody: {
               type: 'string',
               description: 'Updated HTML body (optional)',
+            },
+            replyTo: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Reply-To email addresses (replies go here instead of to the sender)',
             },
           },
           required: ['emailId'],
@@ -973,7 +993,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'send_email': {
-        const { to, cc, bcc, from, mailboxId, subject, textBody, htmlBody, inReplyTo, references } = args as any;
+        const { to, cc, bcc, from, mailboxId, subject, textBody, htmlBody, inReplyTo, references, replyTo } = args as any;
         if (!to || !Array.isArray(to) || to.length === 0) {
           throw new McpError(ErrorCode.InvalidParams, 'to field is required and must be a non-empty array');
         }
@@ -995,6 +1015,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           htmlBody,
           inReplyTo,
           references,
+          replyTo,
         });
 
         return {
@@ -1008,7 +1029,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'reply_email': {
-        const { originalEmailId, to, cc, bcc, from, textBody, htmlBody, send: shouldSend = true } = args as any;
+        const { originalEmailId, to, cc, bcc, from, textBody, htmlBody, send: shouldSend = true, replyTo } = args as any;
         if (!originalEmailId) {
           throw new McpError(ErrorCode.InvalidParams, 'originalEmailId is required');
         }
@@ -1038,16 +1059,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
 
         // Default recipients to the original sender
-        const replyTo = (to && Array.isArray(to) && to.length > 0)
+        const replyRecipients = (to && Array.isArray(to) && to.length > 0)
           ? to
           : (Array.isArray(originalEmail.from) ? originalEmail.from.map((addr: any) => addr.email).filter(Boolean) : []);
 
-        if (replyTo.length === 0) {
+        if (replyRecipients.length === 0) {
           throw new McpError(ErrorCode.InvalidParams, 'Could not determine reply recipient. Please provide "to" explicitly.');
         }
 
         const replyParams = {
-          to: replyTo,
+          to: replyRecipients,
           cc,
           bcc,
           from,
@@ -1056,6 +1077,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           htmlBody,
           inReplyTo: inReplyToHeader,
           references: referencesHeader,
+          replyTo,
         };
 
         if (!shouldSend) {
@@ -1083,7 +1105,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'create_draft': {
-        const { to, cc, bcc, from, mailboxId, subject, textBody, htmlBody, inReplyTo, references } = args as any;
+        const { to, cc, bcc, from, mailboxId, subject, textBody, htmlBody, inReplyTo, references, replyTo } = args as any;
 
         if (!to?.length && !subject && !textBody && !htmlBody) {
           throw new McpError(ErrorCode.InvalidParams, 'At least one of to, subject, textBody, or htmlBody must be provided');
@@ -1100,6 +1122,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           htmlBody,
           inReplyTo,
           references,
+          replyTo,
         });
 
         const summary = [
@@ -1120,7 +1143,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'edit_draft': {
-        const { emailId, to, cc, bcc, from, subject, textBody, htmlBody } = args as any;
+        const { emailId, to, cc, bcc, from, subject, textBody, htmlBody, replyTo } = args as any;
         if (!emailId) {
           throw new McpError(ErrorCode.InvalidParams, 'emailId is required');
         }
@@ -1133,6 +1156,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           subject,
           textBody,
           htmlBody,
+          replyTo,
         });
 
         return {

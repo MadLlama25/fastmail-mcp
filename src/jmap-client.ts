@@ -152,7 +152,7 @@ export class JmapClient {
         ['Email/get', {
           accountId: session.accountId,
           '#ids': { resultOf: 'query', name: 'Email/query', path: '/ids' },
-          properties: ['id', 'subject', 'from', 'to', 'receivedAt', 'preview', 'hasAttachment']
+          properties: ['id', 'subject', 'from', 'to', 'replyTo', 'receivedAt', 'preview', 'hasAttachment']
         }, 'emails']
       ]
     };
@@ -170,7 +170,7 @@ export class JmapClient {
         ['Email/get', {
           accountId: session.accountId,
           ids: [id],
-          properties: ['id', 'subject', 'from', 'to', 'cc', 'bcc', 'receivedAt', 'textBody', 'htmlBody', 'attachments', 'bodyValues', 'messageId', 'threadId', 'inReplyTo', 'references'],
+          properties: ['id', 'subject', 'from', 'to', 'cc', 'bcc', 'replyTo', 'receivedAt', 'textBody', 'htmlBody', 'attachments', 'bodyValues', 'messageId', 'threadId', 'inReplyTo', 'references'],
           bodyProperties: ['partId', 'blobId', 'type', 'size'],
           fetchTextBodyValues: true,
           fetchHTMLBodyValues: true,
@@ -227,6 +227,7 @@ export class JmapClient {
     mailboxId?: string;
     inReplyTo?: string[];
     references?: string[];
+    replyTo?: string[];
   }): Promise<string> {
     const session = await this.getSession();
 
@@ -289,6 +290,7 @@ export class JmapClient {
       subject: email.subject,
       ...(email.inReplyTo && { inReplyTo: email.inReplyTo }),
       ...(email.references && { references: email.references }),
+      ...(email.replyTo?.length && { replyTo: email.replyTo.map(addr => ({ email: addr })) }),
       textBody: email.textBody ? [{ partId: 'text', type: 'text/plain' }] : undefined,
       htmlBody: email.htmlBody ? [{ partId: 'html', type: 'text/html' }] : undefined,
       bodyValues: {
@@ -364,6 +366,7 @@ export class JmapClient {
     mailboxId?: string;
     inReplyTo?: string[];
     references?: string[];
+    replyTo?: string[];
   }): Promise<string> {
     const session = await this.getSession();
 
@@ -420,6 +423,7 @@ export class JmapClient {
     if (email.subject) emailObject.subject = email.subject;
     if (email.inReplyTo?.length) emailObject.inReplyTo = email.inReplyTo;
     if (email.references?.length) emailObject.references = email.references;
+    if (email.replyTo?.length) emailObject.replyTo = email.replyTo.map(addr => ({ email: addr }));
     if (email.textBody) emailObject.textBody = [{ partId: 'text', type: 'text/plain' }];
     if (email.htmlBody) emailObject.htmlBody = [{ partId: 'html', type: 'text/html' }];
     if (email.textBody || email.htmlBody) {
@@ -466,6 +470,7 @@ export class JmapClient {
     textBody?: string;
     htmlBody?: string;
     from?: string;
+    replyTo?: string[];
   }): Promise<string> {
     const session = await this.getSession();
 
@@ -476,7 +481,7 @@ export class JmapClient {
         ['Email/get', {
           accountId: session.accountId,
           ids: [emailId],
-          properties: ['id', 'subject', 'from', 'to', 'cc', 'bcc', 'textBody', 'htmlBody', 'bodyValues', 'mailboxIds', 'keywords'],
+          properties: ['id', 'subject', 'from', 'to', 'cc', 'bcc', 'replyTo', 'textBody', 'htmlBody', 'bodyValues', 'mailboxIds', 'keywords'],
           bodyProperties: ['partId', 'blobId', 'type', 'size'],
           fetchTextBodyValues: true,
           fetchHTMLBodyValues: true,
@@ -538,6 +543,7 @@ export class JmapClient {
     const mergedTo = updates.to !== undefined ? updates.to.map(addr => ({ email: addr })) : (existingEmail.to || []);
     const mergedCc = updates.cc !== undefined ? updates.cc.map(addr => ({ email: addr })) : (existingEmail.cc || []);
     const mergedBcc = updates.bcc !== undefined ? updates.bcc.map(addr => ({ email: addr })) : (existingEmail.bcc || []);
+    const mergedReplyTo = updates.replyTo !== undefined ? updates.replyTo.map(addr => ({ email: addr })) : (existingEmail.replyTo || null);
 
     const textBodyValue = updates.textBody !== undefined ? updates.textBody : (existingTextBody as any)?.value;
     const htmlBodyValue = updates.htmlBody !== undefined ? updates.htmlBody : (existingHtmlBody as any)?.value;
@@ -550,6 +556,7 @@ export class JmapClient {
       cc: mergedCc,
       bcc: mergedBcc,
       subject: mergedSubject,
+      ...(mergedReplyTo?.length && { replyTo: mergedReplyTo }),
     };
 
     if (textBodyValue) emailObject.textBody = [{ partId: 'text', type: 'text/plain' }];
@@ -599,7 +606,7 @@ export class JmapClient {
         ['Email/get', {
           accountId: session.accountId,
           ids: [emailId],
-          properties: ['id', 'from', 'to', 'cc', 'bcc', 'keywords'],
+          properties: ['id', 'from', 'to', 'cc', 'bcc', 'replyTo', 'keywords'],
         }, 'getEmail']
       ]
     };
@@ -717,7 +724,7 @@ export class JmapClient {
         ['Email/get', {
           accountId: session.accountId,
           '#ids': { resultOf: 'query', name: 'Email/query', path: '/ids' },
-          properties: ['id', 'subject', 'from', 'to', 'receivedAt', 'preview', 'hasAttachment', 'keywords']
+          properties: ['id', 'subject', 'from', 'to', 'replyTo', 'receivedAt', 'preview', 'hasAttachment', 'keywords']
         }, 'emails']
       ]
     };
@@ -1153,7 +1160,7 @@ export class JmapClient {
         ['Email/get', {
           accountId: session.accountId,
           '#ids': { resultOf: 'query', name: 'Email/query', path: '/ids' },
-          properties: ['id', 'subject', 'from', 'to', 'cc', 'receivedAt', 'preview', 'hasAttachment', 'keywords', 'threadId']
+          properties: ['id', 'subject', 'from', 'to', 'cc', 'replyTo', 'receivedAt', 'preview', 'hasAttachment', 'keywords', 'threadId']
         }, 'emails']
       ]
     };
@@ -1177,7 +1184,7 @@ export class JmapClient {
         ['Email/get', {
           accountId: session.accountId,
           '#ids': { resultOf: 'query', name: 'Email/query', path: '/ids' },
-          properties: ['id', 'subject', 'from', 'to', 'receivedAt', 'preview', 'hasAttachment']
+          properties: ['id', 'subject', 'from', 'to', 'replyTo', 'receivedAt', 'preview', 'hasAttachment']
         }, 'emails']
       ]
     };
@@ -1226,7 +1233,7 @@ export class JmapClient {
         ['Email/get', {
           accountId: session.accountId,
           '#ids': { resultOf: 'getThread', name: 'Thread/get', path: '/list/*/emailIds' },
-          properties: ['id', 'subject', 'from', 'to', 'cc', 'receivedAt', 'preview', 'hasAttachment', 'keywords', 'threadId']
+          properties: ['id', 'subject', 'from', 'to', 'cc', 'replyTo', 'receivedAt', 'preview', 'hasAttachment', 'keywords', 'threadId']
         }, 'emails']
       ]
     };
