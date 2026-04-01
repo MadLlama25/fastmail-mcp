@@ -143,7 +143,7 @@ You can install this server as a Desktop Extension for Claude Desktop using the 
 
 - **list_mailboxes**: Get all mailboxes in your account
 - **list_emails**: List emails from a specific mailbox or all mailboxes
-  - Parameters: `mailboxId` (optional), `limit` (default: 20)
+  - Parameters: `mailboxId` (optional), `limit` (default: 20), `ascending` (optional, oldest first)
 - **get_email**: Get a specific email by ID
   - Parameters: `emailId` (required)
 - **send_email**: Send an email (supports threading via optional `inReplyTo` and `references` headers)
@@ -155,9 +155,9 @@ You can install this server as a Desktop Extension for Claude Desktop using the 
 - **create_draft**: Create a minimal email draft (at least one of to/subject/body required)
   - Parameters: `to` (optional array), `cc` (optional array), `bcc` (optional array), `from` (optional), `mailboxId` (optional), `subject` (optional), `textBody` (optional), `htmlBody` (optional), `replyTo` (optional array)
 - **search_emails**: Search emails by content
-  - Parameters: `query` (required), `limit` (default: 20)
+  - Parameters: `query` (required), `limit` (default: 20), `ascending` (optional, oldest first)
 - **get_recent_emails**: Get the most recent emails from a mailbox (inspired by JMAP-Samples top-ten)
-  - Parameters: `limit` (default: 10, max: 50), `mailboxName` (default: 'inbox')
+  - Parameters: `limit` (default: 10, max: 50), `mailboxName` (default: 'inbox'), `ascending` (optional, oldest first)
 - **mark_email_read**: Mark an email as read or unread
   - Parameters: `emailId` (required), `read` (default: true)
 - **delete_email**: Delete an email (move to trash)
@@ -176,7 +176,7 @@ You can install this server as a Desktop Extension for Claude Desktop using the 
 - **download_attachment**: Download an email attachment. If savePath is provided, saves the file to disk and returns the file path and size. Otherwise returns a download URL.
   - Parameters: `emailId` (required), `attachmentId` (required), `savePath` (optional)
 - **advanced_search**: Advanced email search with multiple criteria
-  - Parameters: `query` (optional), `from` (optional), `to` (optional), `subject` (optional), `hasAttachment` (optional), `isUnread` (optional), `mailboxId` (optional), `after` (optional), `before` (optional), `limit` (default: 50)
+  - Parameters: `query` (optional), `from` (optional), `to` (optional), `subject` (optional), `hasAttachment` (optional), `isUnread` (optional), `mailboxId` (optional), `after` (optional), `before` (optional), `limit` (default: 50), `ascending` (optional, oldest first)
 - **get_thread**: Get all emails in a conversation thread
   - Parameters: `threadId` (required)
 

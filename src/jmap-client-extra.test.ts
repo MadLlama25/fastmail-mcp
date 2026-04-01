@@ -527,3 +527,102 @@ describe('getListResult', () => {
     assert.deepEqual(mailboxes, []);
   });
 });
+
+// ---------- ascending sort parameter ----------
+
+describe('ascending sort parameter', () => {
+  let client: JmapClient;
+
+  beforeEach(() => {
+    client = makeClient();
+  });
+
+  const QUERY_GET_RESPONSE = {
+    methodResponses: [
+      ['Email/query', { ids: ['e1'] }, 'query'],
+      ['Email/get', { list: [{ id: 'e1', subject: 'Test' }] }, 'emails'],
+    ],
+  };
+
+  describe('getEmails', () => {
+    it('defaults to isAscending: false', async () => {
+      const makeReq = mock.method(client, 'makeRequest', async () => QUERY_GET_RESPONSE);
+
+      await client.getEmails('mb-inbox', 5);
+
+      const sort = makeReq.mock.calls[0].arguments[0].methodCalls[0][1].sort;
+      assert.deepEqual(sort, [{ property: 'receivedAt', isAscending: false }]);
+    });
+
+    it('passes ascending=true as isAscending: true', async () => {
+      const makeReq = mock.method(client, 'makeRequest', async () => QUERY_GET_RESPONSE);
+
+      await client.getEmails('mb-inbox', 5, true);
+
+      const sort = makeReq.mock.calls[0].arguments[0].methodCalls[0][1].sort;
+      assert.deepEqual(sort, [{ property: 'receivedAt', isAscending: true }]);
+    });
+  });
+
+  describe('searchEmails', () => {
+    it('defaults to isAscending: false', async () => {
+      const makeReq = mock.method(client, 'makeRequest', async () => QUERY_GET_RESPONSE);
+
+      await client.searchEmails('test', 10);
+
+      const sort = makeReq.mock.calls[0].arguments[0].methodCalls[0][1].sort;
+      assert.deepEqual(sort, [{ property: 'receivedAt', isAscending: false }]);
+    });
+
+    it('passes ascending=true as isAscending: true', async () => {
+      const makeReq = mock.method(client, 'makeRequest', async () => QUERY_GET_RESPONSE);
+
+      await client.searchEmails('test', 10, true);
+
+      const sort = makeReq.mock.calls[0].arguments[0].methodCalls[0][1].sort;
+      assert.deepEqual(sort, [{ property: 'receivedAt', isAscending: true }]);
+    });
+  });
+
+  describe('getRecentEmails', () => {
+    it('defaults to isAscending: false', async () => {
+      stubMailboxes(client);
+      const makeReq = mock.method(client, 'makeRequest', async () => QUERY_GET_RESPONSE);
+
+      await client.getRecentEmails(10, 'inbox');
+
+      const sort = makeReq.mock.calls[0].arguments[0].methodCalls[0][1].sort;
+      assert.deepEqual(sort, [{ property: 'receivedAt', isAscending: false }]);
+    });
+
+    it('passes ascending=true as isAscending: true', async () => {
+      stubMailboxes(client);
+      const makeReq = mock.method(client, 'makeRequest', async () => QUERY_GET_RESPONSE);
+
+      await client.getRecentEmails(10, 'inbox', true);
+
+      const sort = makeReq.mock.calls[0].arguments[0].methodCalls[0][1].sort;
+      assert.deepEqual(sort, [{ property: 'receivedAt', isAscending: true }]);
+    });
+  });
+
+  describe('advancedSearch', () => {
+    it('defaults to isAscending: false when ascending not specified', async () => {
+      const makeReq = mock.method(client, 'makeRequest', async () => QUERY_GET_RESPONSE);
+
+      await client.advancedSearch({ query: 'test' });
+
+      const sort = makeReq.mock.calls[0].arguments[0].methodCalls[0][1].sort;
+      assert.deepEqual(sort, [{ property: 'receivedAt', isAscending: false }]);
+    });
+
+    it('passes ascending: true as isAscending: true', async () => {
+      const makeReq = mock.method(client, 'makeRequest', async () => QUERY_GET_RESPONSE);
+
+      await client.advancedSearch({ query: 'test', ascending: true });
+
+      const sort = makeReq.mock.calls[0].arguments[0].methodCalls[0][1].sort;
+      assert.deepEqual(sort, [{ property: 'receivedAt', isAscending: true }]);
+    });
+  });
+});

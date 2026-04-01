@@ -135,18 +135,18 @@ export class JmapClient {
     return this.getListResult(response, 0);
   }
 
-  async getEmails(mailboxId?: string, limit: number = 20): Promise<any[]> {
+  async getEmails(mailboxId?: string, limit: number = 20, ascending: boolean = false): Promise<any[]> {
     const session = await this.getSession();
-    
+
     const filter = mailboxId ? { inMailbox: mailboxId } : {};
-    
+
     const request: JmapRequest = {
       using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
       methodCalls: [
         ['Email/query', {
           accountId: session.accountId,
           filter,
-          sort: [{ property: 'receivedAt', isAscending: false }],
+          sort: [{ property: 'receivedAt', isAscending: ascending }],
           limit
         }, 'query'],
         ['Email/get', {
@@ -698,7 +698,7 @@ export class JmapClient {
     return submissionId;
   }
 
-  async getRecentEmails(limit: number = 10, mailboxName: string = 'inbox'): Promise<any[]> {
+  async getRecentEmails(limit: number = 10, mailboxName: string = 'inbox', ascending: boolean = false): Promise<any[]> {
     const session = await this.getSession();
     
     // Find the specified mailbox (default to inbox)
@@ -718,7 +718,7 @@ export class JmapClient {
         ['Email/query', {
           accountId: session.accountId,
           filter: { inMailbox: targetMailbox.id },
-          sort: [{ property: 'receivedAt', isAscending: false }],
+          sort: [{ property: 'receivedAt', isAscending: ascending }],
           limit: Math.min(limit, 50)
         }, 'query'],
         ['Email/get', {
@@ -1116,6 +1116,7 @@ export class JmapClient {
     after?: string;
     before?: string;
     limit?: number;
+    ascending?: boolean;
   }): Promise<any[]> {
     const session = await this.getSession();
     
@@ -1153,7 +1154,7 @@ export class JmapClient {
         ['Email/query', {
           accountId: session.accountId,
           filter: finalFilter,
-          sort: [{ property: 'receivedAt', isAscending: false }],
+          sort: [{ property: 'receivedAt', isAscending: filters.ascending ?? false }],
           limit: Math.min(filters.limit || 50, 100)
         }, 'query'],
         ['Email/get', {
@@ -1168,7 +1169,7 @@ export class JmapClient {
     return this.getListResult(response, 1);
   }
 
-  async searchEmails(query: string, limit: number = 20): Promise<any[]> {
+  async searchEmails(query: string, limit: number = 20, ascending: boolean = false): Promise<any[]> {
     const session = await this.getSession();
 
     const request: JmapRequest = {
@@ -1177,7 +1178,7 @@ export class JmapClient {
         ['Email/query', {
           accountId: session.accountId,
           filter: { text: query },
-          sort: [{ property: 'receivedAt', isAscending: false }],
+          sort: [{ property: 'receivedAt', isAscending: ascending }],
           limit
         }, 'query'],
         ['Email/get', {
