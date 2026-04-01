@@ -1,6 +1,6 @@
 import { FastmailAuth } from './auth.js';
 import { writeFile, mkdir } from 'fs/promises';
-import { dirname, resolve, normalize } from 'path';
+import { dirname, resolve, normalize, sep, isAbsolute } from 'path';
 import { homedir } from 'os';
 
 export interface JmapSession {
@@ -1060,26 +1060,32 @@ export class JmapClient {
 
   static readonly DEFAULT_DOWNLOADS_DIR = resolve(homedir(), 'Downloads', 'fastmail-mcp');
 
-  static validateSavePath(savePath: string): string {
-    const allowedDir = JmapClient.DEFAULT_DOWNLOADS_DIR;
-    const resolved = resolve(normalize(savePath));
-
-    if (!resolved.startsWith(allowedDir + '/') && resolved !== allowedDir) {
-      throw new Error(
-        `Save path must be within ${allowedDir}. ` +
-        `Received: ${savePath}`
-      );
+  static validateSavePath(savePath: string, allowAnyPath: boolean = false): string {
+    if (savePath.includes('\0')) {
+      throw new Error('Save path contains null bytes');
     }
 
-    if (resolved.includes('\0')) {
-      throw new Error('Save path contains null bytes');
+    // In restricted mode, resolve relative paths against the default downloads dir
+    const resolved = !allowAnyPath && !isAbsolute(savePath)
+      ? resolve(JmapClient.DEFAULT_DOWNLOADS_DIR, normalize(savePath))
+      : resolve(normalize(savePath));
+
+    if (!allowAnyPath) {
+      const allowedDir = JmapClient.DEFAULT_DOWNLOADS_DIR;
+      if (!resolved.startsWith(allowedDir + sep) && resolved !== allowedDir) {
+        throw new Error(
+          `Save path must be within ${allowedDir}. ` +
+          `Set FASTMAIL_ALLOW_ANY_PATH=true to save anywhere. ` +
+          `Received: ${savePath}`
+        );
+      }
     }
 
     return resolved;
   }
 
-  async downloadAttachmentToFile(emailId: string, attachmentId: string, savePath: string): Promise<{ url: string; bytesWritten: number }> {
-    const validatedPath = JmapClient.validateSavePath(savePath);
+  async downloadAttachmentToFile(emailId: string, attachmentId: string, savePath: string, allowAnyPath: boolean = false): Promise<{ url: string; bytesWritten: number }> {
+    const validatedPath = JmapClient.validateSavePath(savePath, allowAnyPath);
     const url = await this.downloadAttachment(emailId, attachmentId);
 
     const response = await fetch(url, {

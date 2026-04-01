@@ -668,7 +668,9 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'download_attachment',
-        description: 'Download an email attachment. If savePath is provided, saves the file to disk and returns the file path and size. Otherwise returns a download URL.',
+        description: process.env.FASTMAIL_ALLOW_ANY_PATH === 'true'
+          ? 'Download an email attachment. If savePath is provided, saves the file to the specified path. Otherwise returns a download URL.'
+          : 'Download an email attachment. If savePath is provided, saves the file to disk within ~/Downloads/fastmail-mcp/. Otherwise returns a download URL.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -682,7 +684,9 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             savePath: {
               type: 'string',
-              description: 'File path within ~/Downloads/fastmail-mcp/ to save the attachment to. Paths outside this directory are rejected for security. Parent directories will be created automatically.',
+              description: process.env.FASTMAIL_ALLOW_ANY_PATH === 'true'
+                ? 'File path to save the attachment to. Parent directories will be created automatically.'
+                : 'File path within ~/Downloads/fastmail-mcp/ to save the attachment to. Paths outside this directory are rejected for security. Set FASTMAIL_ALLOW_ANY_PATH=true to allow any path. Parent directories will be created automatically.',
             },
           },
           required: ['emailId', 'attachmentId'],
@@ -1462,7 +1466,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const client = initializeClient();
         try {
           if (savePath) {
-            const result = await client.downloadAttachmentToFile(emailId, attachmentId, savePath);
+            const allowAnyPath = process.env.FASTMAIL_ALLOW_ANY_PATH === 'true';
+            const result = await client.downloadAttachmentToFile(emailId, attachmentId, savePath, allowAnyPath);
             return {
               content: [
                 {

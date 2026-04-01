@@ -1,7 +1,7 @@
 import { describe, it, beforeEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { homedir } from 'os';
-import { resolve } from 'path';
+import { resolve, join } from 'path';
 import { JmapClient } from './jmap-client.js';
 import { FastmailAuth } from './auth.js';
 
@@ -543,12 +543,12 @@ describe('validateSavePath', () => {
 
   it('accepts paths within the allowed directory', () => {
     const result = JmapClient.validateSavePath(`${allowedDir}/photo.jpg`);
-    assert.equal(result, `${allowedDir}/photo.jpg`);
+    assert.equal(result, resolve(allowedDir, 'photo.jpg'));
   });
 
   it('accepts paths in subdirectories', () => {
     const result = JmapClient.validateSavePath(`${allowedDir}/andrew/assets/logo.png`);
-    assert.equal(result, `${allowedDir}/andrew/assets/logo.png`);
+    assert.equal(result, resolve(allowedDir, 'andrew', 'assets', 'logo.png'));
   });
 
   it('rejects paths outside the allowed directory', () => {
@@ -586,6 +586,46 @@ describe('validateSavePath', () => {
       () => JmapClient.validateSavePath(`${allowedDir}/file\0.txt`),
       (err: Error) => {
         assert.match(err.message, /null bytes/);
+        return true;
+      },
+    );
+  });
+
+  it('allows any path when allowAnyPath is true', () => {
+    const result = JmapClient.validateSavePath('/tmp/any/path/file.txt', true);
+    assert.equal(result, resolve('/tmp/any/path/file.txt'));
+  });
+
+  it('resolves bare filenames to downloads dir in restricted mode', () => {
+    const result = JmapClient.validateSavePath('report.pdf');
+    assert.equal(result, join(JmapClient.DEFAULT_DOWNLOADS_DIR, 'report.pdf'));
+  });
+
+  it('resolves relative paths to downloads dir in restricted mode', () => {
+    const result = JmapClient.validateSavePath('2026/march/report.pdf');
+    assert.equal(result, join(JmapClient.DEFAULT_DOWNLOADS_DIR, '2026', 'march', 'report.pdf'));
+  });
+
+  it('resolves relative paths against CWD when allowAnyPath is true', () => {
+    const result = JmapClient.validateSavePath('output/file.txt', true);
+    assert.equal(result, resolve('output/file.txt'));
+  });
+
+  it('rejects traversal escaping downloads dir even with allowAnyPath false', () => {
+    assert.throws(
+      () => JmapClient.validateSavePath(`${allowedDir}/../../etc/passwd`, false),
+      (err: Error) => {
+        assert.match(err.message, /must be within/);
+        return true;
+      },
+    );
+  });
+
+  it('error message mentions FASTMAIL_ALLOW_ANY_PATH', () => {
+    assert.throws(
+      () => JmapClient.validateSavePath('/tmp/evil.sh'),
+      (err: Error) => {
+        assert.match(err.message, /FASTMAIL_ALLOW_ANY_PATH/);
         return true;
       },
     );

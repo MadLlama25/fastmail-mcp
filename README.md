@@ -73,6 +73,8 @@ A Model Context Protocol (MCP) server that provides access to the Fastmail API, 
    export FASTMAIL_API_TOKEN="your_api_token_here"
    # Optional: customize base URL (defaults to https://api.fastmail.com)
    export FASTMAIL_BASE_URL="https://api.fastmail.com"
+   # Optional: allow download_attachment to save files anywhere (defaults to ~/Downloads/fastmail-mcp/)
+   export FASTMAIL_ALLOW_ANY_PATH="true"
    ```
 
 ### Running the Server
@@ -173,7 +175,7 @@ You can install this server as a Desktop Extension for Claude Desktop using the 
 
 - **get_email_attachments**: Get list of attachments for an email
   - Parameters: `emailId` (required)
-- **download_attachment**: Download an email attachment. If savePath is provided, saves the file to disk and returns the file path and size. Otherwise returns a download URL.
+- **download_attachment**: Download an email attachment. If savePath is provided, saves the file to disk and returns the file path and size. By default, saves are restricted to `~/Downloads/fastmail-mcp/`; set `FASTMAIL_ALLOW_ANY_PATH=true` to allow saving anywhere. Otherwise returns a download URL.
   - Parameters: `emailId` (required), `attachmentId` (required), `savePath` (optional)
 - **advanced_search**: Advanced email search with multiple criteria
   - Parameters: `query` (optional), `from` (optional), `to` (optional), `subject` (optional), `hasAttachment` (optional), `isUnread` (optional), `mailboxId` (optional), `after` (optional), `before` (optional), `limit` (default: 50)
