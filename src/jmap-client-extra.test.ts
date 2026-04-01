@@ -326,7 +326,7 @@ describe('markEmailRead', () => {
     await client.markEmailRead('e1', true);
 
     const update = makeReq.mock.calls[0].arguments[0].methodCalls[0][1].update;
-    assert.deepEqual(update['e1'].keywords, { $seen: true });
+    assert.deepEqual(update['e1'], { 'keywords/$seen': true });
   });
 
   it('marks email as unread', async () => {
@@ -339,7 +339,7 @@ describe('markEmailRead', () => {
     await client.markEmailRead('e1', false);
 
     const update = makeReq.mock.calls[0].arguments[0].methodCalls[0][1].update;
-    assert.deepEqual(update['e1'].keywords, {});
+    assert.deepEqual(update['e1'], { 'keywords/$seen': null });
   });
 
   it('throws when update fails', async () => {
@@ -378,9 +378,9 @@ describe('bulkMarkRead', () => {
     await client.bulkMarkRead(['e1', 'e2', 'e3'], true);
 
     const update = makeReq.mock.calls[0].arguments[0].methodCalls[0][1].update;
-    assert.deepEqual(update['e1'].keywords, { $seen: true });
-    assert.deepEqual(update['e2'].keywords, { $seen: true });
-    assert.deepEqual(update['e3'].keywords, { $seen: true });
+    assert.deepEqual(update['e1'], { 'keywords/$seen': true });
+    assert.deepEqual(update['e2'], { 'keywords/$seen': true });
+    assert.deepEqual(update['e3'], { 'keywords/$seen': true });
   });
 
   it('marks multiple emails as unread', async () => {
@@ -393,8 +393,8 @@ describe('bulkMarkRead', () => {
     await client.bulkMarkRead(['e1', 'e2'], false);
 
     const update = makeReq.mock.calls[0].arguments[0].methodCalls[0][1].update;
-    assert.deepEqual(update['e1'].keywords, {});
-    assert.deepEqual(update['e2'].keywords, {});
+    assert.deepEqual(update['e1'], { 'keywords/$seen': null });
+    assert.deepEqual(update['e2'], { 'keywords/$seen': null });
   });
 
   it('throws when some emails fail to update', async () => {
