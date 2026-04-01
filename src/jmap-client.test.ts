@@ -591,3 +591,128 @@ describe('validateSavePath', () => {
     );
   });
 });
+
+// ---------- sendEmail replyTo ----------
+
+describe('sendEmail replyTo', () => {
+  let client: JmapClient;
+
+  beforeEach(() => {
+    client = makeClient();
+    mock.method(client, 'getMailboxes', async () => [
+      DRAFTS_MAILBOX,
+      { id: 'mb-sent', name: 'Sent', role: 'sent' },
+    ]);
+  });
+
+  it('includes replyTo in JMAP emailObject when provided', async () => {
+    const makeReq = mock.method(client, 'makeRequest', async () => ({
+      methodResponses: [
+        ['Email/set', { created: { draft: { id: 'email-new' } } }, 'createEmail'],
+        ['EmailSubmission/set', { created: { submission: { id: 'sub-1' } } }, 'submitEmail'],
+      ],
+    }));
+
+    await client.sendEmail({
+      to: ['bob@example.com'],
+      subject: 'Test',
+      textBody: 'Hello',
+      replyTo: ['other@example.com'],
+    });
+
+    const emailObj = makeReq.mock.calls[0].arguments[0].methodCalls[0][1].create.draft;
+    assert.deepEqual(emailObj.replyTo, [{ email: 'other@example.com' }]);
+  });
+
+  it('does NOT include replyTo when not provided', async () => {
+    const makeReq = mock.method(client, 'makeRequest', async () => ({
+      methodResponses: [
+        ['Email/set', { created: { draft: { id: 'email-new' } } }, 'createEmail'],
+        ['EmailSubmission/set', { created: { submission: { id: 'sub-1' } } }, 'submitEmail'],
+      ],
+    }));
+
+    await client.sendEmail({
+      to: ['bob@example.com'],
+      subject: 'Test',
+      textBody: 'Hello',
+    });
+
+    const emailObj = makeReq.mock.calls[0].arguments[0].methodCalls[0][1].create.draft;
+    assert.equal(emailObj.replyTo, undefined);
+  });
+});
+
+// ---------- createDraft replyTo ----------
+
+describe('createDraft replyTo', () => {
+  let client: JmapClient;
+
+  beforeEach(() => {
+    client = makeClient();
+  });
+
+  it('includes replyTo in created email object when provided', async () => {
+    const makeReq = mock.method(client, 'makeRequest', async () => ({
+      methodResponses: [
+        ['Email/set', { created: { draft: { id: 'email-draft' } } }, 'createDraft'],
+      ],
+    }));
+
+    await client.createDraft({
+      subject: 'Draft with replyTo',
+      replyTo: ['noreply@example.com'],
+    });
+
+    const emailObj = makeReq.mock.calls[0].arguments[0].methodCalls[0][1].create.draft;
+    assert.deepEqual(emailObj.replyTo, [{ email: 'noreply@example.com' }]);
+  });
+});
+
+// ---------- updateDraft replyTo ----------
+
+describe('updateDraft replyTo', () => {
+  let client: JmapClient;
+
+  beforeEach(() => {
+    client = makeClient();
+  });
+
+  it('overrides existing replyTo when provided in updates', async () => {
+    const existingWithReplyTo = {
+      ...EXISTING_DRAFT,
+      replyTo: [{ email: 'old-reply@example.com' }],
+    };
+
+    const makeReq = mock.method(client, 'makeRequest', async (req: any) => {
+      if (req.methodCalls[0][0] === 'Email/get') {
+        return { methodResponses: [['Email/get', { list: [existingWithReplyTo] }, 'getEmail']] };
+      }
+      return { methodResponses: [['Email/set', { created: { draft: { id: 'draft-new' } }, destroyed: ['draft-1'] }, 'updateDraft']] };
+    });
+
+    await client.updateDraft('draft-1', { replyTo: ['new-reply@example.com'] });
+
+    const emailObj = makeReq.mock.calls[1].arguments[0].methodCalls[0][1].create.draft;
+    assert.deepEqual(emailObj.replyTo, [{ email: 'new-reply@example.com' }]);
+  });
+
+  it('preserves existing replyTo when not provided in updates', async () => {
+    const existingWithReplyTo = {
+      ...EXISTING_DRAFT,
+      replyTo: [{ email: 'keep-me@example.com' }],
+    };
+
+    const makeReq = mock.method(client, 'makeRequest', async (req: any) => {
+      if (req.methodCalls[0][0] === 'Email/get') {
+        return { methodResponses: [['Email/get', { list: [existingWithReplyTo] }, 'getEmail']] };
+      }
+      return { methodResponses: [['Email/set', { created: { draft: { id: 'draft-new' } }, destroyed: ['draft-1'] }, 'updateDraft']] };
+    });
+
+    await client.updateDraft('draft-1', { subject: 'Updated subject only' });
+
+    const emailObj = makeReq.mock.calls[1].arguments[0].methodCalls[0][1].create.draft;
+    assert.deepEqual(emailObj.replyTo, [{ email: 'keep-me@example.com' }]);
+  });
+});

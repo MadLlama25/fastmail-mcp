@@ -147,13 +147,13 @@ You can install this server as a Desktop Extension for Claude Desktop using the 
 - **get_email**: Get a specific email by ID
   - Parameters: `emailId` (required)
 - **send_email**: Send an email (supports threading via optional `inReplyTo` and `references` headers)
-  - Parameters: `to` (required array), `cc` (optional array), `bcc` (optional array), `from` (optional), `mailboxId` (optional), `subject` (required), `textBody` (optional), `htmlBody` (optional), `inReplyTo` (optional array), `references` (optional array)
+  - Parameters: `to` (required array), `cc` (optional array), `bcc` (optional array), `from` (optional), `mailboxId` (optional), `subject` (required), `textBody` (optional), `htmlBody` (optional), `inReplyTo` (optional array), `references` (optional array), `replyTo` (optional array)
 - **reply_email**: Reply to an existing email with proper threading headers (automatically builds In-Reply-To and References). Set `send=false` to save as draft instead of sending.
-  - Parameters: `originalEmailId` (required), `to` (optional array, defaults to original sender), `cc` (optional array), `bcc` (optional array), `from` (optional), `textBody` (optional), `htmlBody` (optional), `send` (optional boolean, default: true)
+  - Parameters: `originalEmailId` (required), `to` (optional array, defaults to original sender), `cc` (optional array), `bcc` (optional array), `from` (optional), `textBody` (optional), `htmlBody` (optional), `send` (optional boolean, default: true), `replyTo` (optional array)
 - **save_draft**: Save an email as a draft without sending (supports threading headers for reply drafts)
   - Parameters: `to` (required array), `cc` (optional array), `bcc` (optional array), `from` (optional), `subject` (required), `textBody` (optional), `htmlBody` (optional), `inReplyTo` (optional array), `references` (optional array)
 - **create_draft**: Create a minimal email draft (at least one of to/subject/body required)
-  - Parameters: `to` (optional array), `cc` (optional array), `bcc` (optional array), `from` (optional), `mailboxId` (optional), `subject` (optional), `textBody` (optional), `htmlBody` (optional)
+  - Parameters: `to` (optional array), `cc` (optional array), `bcc` (optional array), `from` (optional), `mailboxId` (optional), `subject` (optional), `textBody` (optional), `htmlBody` (optional), `replyTo` (optional array)
 - **search_emails**: Search emails by content
   - Parameters: `query` (required), `limit` (default: 20)
 - **get_recent_emails**: Get the most recent emails from a mailbox (inspired by JMAP-Samples top-ten)
