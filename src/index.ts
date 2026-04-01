@@ -136,6 +136,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               description: 'Maximum number of emails to return (default: 20)',
               default: 20,
             },
+            ascending: {
+              type: 'boolean',
+              description: 'Sort oldest first instead of newest first (default: false)',
+            },
           },
         },
       },
@@ -381,6 +385,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               description: 'Maximum number of results (default: 20)',
               default: 20,
             },
+            ascending: {
+              type: 'boolean',
+              description: 'Sort oldest first instead of newest first (default: false)',
+            },
           },
           required: ['query'],
         },
@@ -540,6 +548,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: 'string',
               description: 'Mailbox to search (default: inbox)',
               default: 'inbox',
+            },
+            ascending: {
+              type: 'boolean',
+              description: 'Sort oldest first instead of newest first (default: false)',
             },
           },
         },
@@ -738,6 +750,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: 'number',
               description: 'Maximum results (default: 50)',
               default: 50,
+            },
+            ascending: {
+              type: 'boolean',
+              description: 'Sort oldest first instead of newest first (default: false)',
             },
           },
         },
@@ -943,9 +959,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'list_emails': {
-        const { mailboxId, limit } = args as any;
+        const { mailboxId, limit, ascending } = args as any;
         const validLimit = Math.min(Math.max(Number(limit) || 20, 1), 50);
-        const emails = await client.getEmails(mailboxId, validLimit);
+        const emails = await client.getEmails(mailboxId, validLimit, !!ascending);
         return {
           content: [
             {
@@ -1164,11 +1180,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'search_emails': {
-        const { query, limit = 20 } = args as any;
+        const { query, limit = 20, ascending } = args as any;
         if (!query) {
           throw new McpError(ErrorCode.InvalidParams, 'query is required');
         }
-        const emails = await client.searchEmails(query, limit);
+        const emails = await client.searchEmails(query, limit, !!ascending);
         return {
           content: [
             {
@@ -1316,9 +1332,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'get_recent_emails': {
-        const { limit = 10, mailboxName = 'inbox' } = args as any;
+        const { limit = 10, mailboxName = 'inbox', ascending } = args as any;
         const client = initializeClient();
-        const emails = await client.getRecentEmails(limit, mailboxName);
+        const emails = await client.getRecentEmails(limit, mailboxName, !!ascending);
         return {
           content: [
             {
@@ -1496,10 +1512,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'advanced_search': {
-        const { query, from, to, subject, hasAttachment, isUnread, isPinned, mailboxId, after, before, limit } = args as any;
+        const { query, from, to, subject, hasAttachment, isUnread, isPinned, mailboxId, after, before, limit, ascending } = args as any;
         const client = initializeClient();
         const emails = await client.advancedSearch({
-          query, from, to, subject, hasAttachment, isUnread, isPinned, mailboxId, after, before, limit
+          query, from, to, subject, hasAttachment, isUnread, isPinned, mailboxId, after, before, limit, ascending
         });
         return {
           content: [
