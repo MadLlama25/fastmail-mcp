@@ -15,7 +15,7 @@ import { CalDAVCalendarClient } from './caldav-client.js';
 const server = new Server(
   {
     name: 'fastmail-mcp',
-    version: '1.8.2',
+    version: '1.9.0',
   },
   {
     capabilities: {
@@ -108,6 +108,15 @@ function initializeCalDAVClient(): CalDAVCalendarClient | null {
 
   caldavClient = new CalDAVCalendarClient({ username, password });
   return caldavClient;
+}
+
+function getDownloadDir(): string | undefined {
+  return findEnvValue([
+    'FASTMAIL_DOWNLOAD_DIR',
+    'USER_CONFIG_FASTMAIL_DOWNLOAD_DIR',
+    'USER_CONFIG_fastmail_download_dir',
+    'fastmail_download_dir',
+  ]).value;
 }
 
 server.setRequestHandler(ListToolsRequestSchema, async () => {
@@ -722,7 +731,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             savePath: {
               type: 'string',
-              description: 'File path within ~/Downloads/fastmail-mcp/ to save the attachment to. Paths outside this directory are rejected for security. Parent directories will be created automatically.',
+              description: `File path to save the attachment to. Paths are restricted to ${getDownloadDir() || '~/Downloads/fastmail-mcp/'} (configurable via FASTMAIL_DOWNLOAD_DIR). Path traversal outside this directory is rejected for security. Parent directories will be created automatically.`,
             },
           },
           required: ['emailId', 'attachmentId'],
@@ -1510,7 +1519,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const client = initializeClient();
         try {
           if (savePath) {
-            const result = await client.downloadAttachmentToFile(emailId, attachmentId, savePath);
+            const result = await client.downloadAttachmentToFile(emailId, attachmentId, savePath, getDownloadDir());
             return {
               content: [
                 {

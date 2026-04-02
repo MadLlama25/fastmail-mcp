@@ -590,6 +590,34 @@ describe('validateSavePath', () => {
       },
     );
   });
+
+  it('accepts paths within a custom download directory', () => {
+    const customDir = '/tmp/my-downloads';
+    const result = JmapClient.validateSavePath(`${customDir}/photo.jpg`, customDir);
+    assert.equal(result, `${customDir}/photo.jpg`);
+  });
+
+  it('rejects paths outside a custom download directory', () => {
+    const customDir = '/tmp/my-downloads';
+    assert.throws(
+      () => JmapClient.validateSavePath('/etc/passwd', customDir),
+      (err: Error) => {
+        assert.match(err.message, /must be within/);
+        return true;
+      },
+    );
+  });
+
+  it('rejects traversal out of a custom download directory', () => {
+    const customDir = '/tmp/my-downloads';
+    assert.throws(
+      () => JmapClient.validateSavePath(`${customDir}/../../etc/shadow`, customDir),
+      (err: Error) => {
+        assert.match(err.message, /must be within/);
+        return true;
+      },
+    );
+  });
 });
 
 // ---------- sendEmail replyTo ----------

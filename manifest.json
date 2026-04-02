@@ -1,7 +1,7 @@
 {
   "dxt_version": "0.1",
   "name": "fastmail-mcp",
-  "version": "1.8.2",
+  "version": "1.9.0",
   "description": "MCP server for Fastmail API integration",
   "author": {
     "name": "Jeremy Gill"
@@ -16,7 +16,8 @@
       ],
       "env": {
         "FASTMAIL_API_TOKEN": "${user_config.fastmail_api_token}",
-        "FASTMAIL_BASE_URL": "${user_config.fastmail_base_url}"
+        "FASTMAIL_BASE_URL": "${user_config.fastmail_base_url}",
+        "FASTMAIL_DOWNLOAD_DIR": "${user_config.fastmail_download_dir}"
       }
     }
   },
@@ -33,6 +34,12 @@
       "type": "string",
       "description": "Fastmail API base URL (leave default unless using a custom endpoint)",
       "default": "https://api.fastmail.com",
+      "required": false
+    },
+    "fastmail_download_dir": {
+      "title": "Attachment Download Directory",
+      "type": "string",
+      "description": "Directory for saving email attachments (defaults to ~/Downloads/fastmail-mcp/). Path traversal protection is enforced within this directory.",
       "required": false
     }
   },
