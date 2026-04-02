@@ -336,3 +336,123 @@ describe('CalDAVCalendarClient.getCalendarEvents', () => {
     assert.equal(callArgs.timeRange, undefined);
   });
 });
+
+describe('CalDAVCalendarClient.updateCalendarEvent', () => {
+  function makeFullIcal(uid: string, summary: string, dtstart: string, dtend: string, description?: string, location?: string): string {
+    const lines = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//fastmail-mcp//CalDAV//EN',
+      'BEGIN:VEVENT',
+      `UID:${uid}`,
+      `DTSTAMP:20260401T000000Z`,
+      `DTSTART:${dtstart}`,
+      `DTEND:${dtend}`,
+      `SUMMARY:${escapeICalText(summary)}`,
+    ];
+    if (description) lines.push(`DESCRIPTION:${escapeICalText(description)}`);
+    if (location) lines.push(`LOCATION:${escapeICalText(location)}`);
+    lines.push('END:VEVENT', 'END:VCALENDAR');
+    return lines.join('\r\n');
+  }
+
+  function createMockedClientWithUpdateDelete(calendarObjects: Array<{ data: string; url: string; etag?: string }>) {
+    const client = new CalDAVCalendarClient({ username: 'test', password: 'test' });
+    const mockDAVClient = {
+      login: mock.fn(async () => {}),
+      fetchCalendars: mock.fn(async () => [
+        { displayName: 'Personal', url: '/cal/personal/' },
+      ]),
+      fetchCalendarObjects: mock.fn(async () => calendarObjects),
+      updateCalendarObject: mock.fn(async () => ({})),
+      deleteCalendarObject: mock.fn(async () => ({})),
+    };
+    (client as any).client = mockDAVClient;
+    return { client, mockDAVClient };
+  }
+
+  it('updates only the title, preserving other fields', async () => {
+    const ical = makeFullIcal('evt1@fm', 'Original Title', '20260401T100000Z', '20260401T110000Z', 'My description', 'Room A');
+    const objects = [{ data: ical, url: '/cal/evt1.ics', etag: '"etag1"' }];
+    const { client, mockDAVClient } = createMockedClientWithUpdateDelete(objects);
+
+    const result = await client.updateCalendarEvent('evt1@fm', { title: 'New Title' });
+
+    assert.equal(result, 'evt1@fm');
+    assert.equal(mockDAVClient.updateCalendarObject.mock.calls.length, 1);
+    const updatedObj = mockDAVClient.updateCalendarObject.mock.calls[0].arguments[0].calendarObject;
+    assert.ok(updatedObj.data.includes('SUMMARY:New Title'));
+    assert.ok(updatedObj.data.includes('DESCRIPTION:My description'));
+    assert.ok(updatedObj.data.includes('LOCATION:Room A'));
+    assert.ok(updatedObj.data.includes('DTSTART:20260401T100000Z'));
+    assert.ok(updatedObj.data.includes('UID:evt1@fm'));
+  });
+
+  it('updates start and end times', async () => {
+    const ical = makeFullIcal('evt2@fm', 'Meeting', '20260401T100000Z', '20260401T110000Z');
+    const objects = [{ data: ical, url: '/cal/evt2.ics' }];
+    const { client, mockDAVClient } = createMockedClientWithUpdateDelete(objects);
+
+    await client.updateCalendarEvent('evt2@fm', {
+      start: '2026-04-02T14:00:00Z',
+      end: '2026-04-02T15:00:00Z',
+    });
+
+    const updatedObj = mockDAVClient.updateCalendarObject.mock.calls[0].arguments[0].calendarObject;
+    assert.ok(updatedObj.data.includes('DTSTART:20260402T140000Z'));
+    assert.ok(updatedObj.data.includes('DTEND:20260402T150000Z'));
+    assert.ok(updatedObj.data.includes('SUMMARY:Meeting'));
+  });
+
+  it('throws when event not found', async () => {
+    const { client } = createMockedClientWithUpdateDelete([]);
+    await assert.rejects(
+      () => client.updateCalendarEvent('nonexistent@fm', { title: 'X' }),
+      /Calendar event not found: nonexistent@fm/
+    );
+  });
+});
+
+describe('CalDAVCalendarClient.deleteCalendarEvent', () => {
+  function createMockedClientWithDelete(calendarObjects: Array<{ data: string; url: string; etag?: string }>) {
+    const client = new CalDAVCalendarClient({ username: 'test', password: 'test' });
+    const mockDAVClient = {
+      login: mock.fn(async () => {}),
+      fetchCalendars: mock.fn(async () => [
+        { displayName: 'Personal', url: '/cal/personal/' },
+      ]),
+      fetchCalendarObjects: mock.fn(async () => calendarObjects),
+      deleteCalendarObject: mock.fn(async () => ({})),
+    };
+    (client as any).client = mockDAVClient;
+    return { client, mockDAVClient };
+  }
+
+  it('deletes an event by UID', async () => {
+    const ical = [
+      'BEGIN:VCALENDAR',
+      'BEGIN:VEVENT',
+      'UID:del1@fm',
+      'DTSTART:20260401T100000Z',
+      'SUMMARY:To Delete',
+      'END:VEVENT',
+      'END:VCALENDAR',
+    ].join('\r\n');
+    const objects = [{ data: ical, url: '/cal/del1.ics', etag: '"etag1"' }];
+    const { client, mockDAVClient } = createMockedClientWithDelete(objects);
+
+    await client.deleteCalendarEvent('del1@fm');
+
+    assert.equal(mockDAVClient.deleteCalendarObject.mock.calls.length, 1);
+    const deletedObj = mockDAVClient.deleteCalendarObject.mock.calls[0].arguments[0].calendarObject;
+    assert.equal(deletedObj.url, '/cal/del1.ics');
+  });
+
+  it('throws when event not found', async () => {
+    const { client } = createMockedClientWithDelete([]);
+    await assert.rejects(
+      () => client.deleteCalendarEvent('nonexistent@fm'),
+      /Calendar event not found: nonexistent@fm/
+    );
+  });
+});
