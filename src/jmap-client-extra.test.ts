@@ -87,9 +87,9 @@ describe('getRecentEmails', () => {
       ],
     });
 
-    const emails = await client.getRecentEmails(10, 'inbox');
-    assert.equal(emails.length, 2);
-    assert.equal(emails[0].subject, 'First');
+    const result = await client.getRecentEmails(10, 'inbox');
+    assert.equal(result.items.length, 2);
+    assert.equal(result.items[0].subject, 'First');
   });
 
   it('throws when mailbox is not found', async () => {
@@ -113,8 +113,8 @@ describe('getRecentEmails', () => {
       ],
     });
 
-    const emails = await client.getRecentEmails(5, 'inbox');
-    assert.deepEqual(emails, []);
+    const result = await client.getRecentEmails(5, 'inbox');
+    assert.deepEqual(result.items, []);
   });
 });
 
@@ -135,8 +135,8 @@ describe('getEmails', () => {
       ],
     }));
 
-    const emails = await client.getEmails('mb-inbox', 5);
-    assert.equal(emails.length, 1);
+    const result = await client.getEmails('mb-inbox', 5);
+    assert.equal(result.items.length, 1);
 
     const filter = makeReq.mock.calls[0].arguments[0].methodCalls[0][1].filter;
     assert.equal(filter.inMailbox, 'mb-inbox');
@@ -150,8 +150,8 @@ describe('getEmails', () => {
       ],
     }));
 
-    const emails = await client.getEmails(undefined, 10);
-    assert.equal(emails.length, 1);
+    const result = await client.getEmails(undefined, 10);
+    assert.equal(result.items.length, 1);
 
     const filter = makeReq.mock.calls[0].arguments[0].methodCalls[0][1].filter;
     assert.deepEqual(filter, {});
