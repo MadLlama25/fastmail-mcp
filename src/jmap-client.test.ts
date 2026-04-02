@@ -504,8 +504,8 @@ describe('searchEmails', () => {
       ],
     });
     const results = await client.searchEmails('test', 10);
-    assert.equal(results.length, 1);
-    assert.equal(results[0].subject, 'Test');
+    assert.equal(results.items.length, 1);
+    assert.equal(results.items[0].subject, 'Test');
   });
 
   it('returns empty array when no results', async () => {
@@ -516,7 +516,7 @@ describe('searchEmails', () => {
       ],
     });
     const results = await client.searchEmails('nonexistent');
-    assert.deepEqual(results, []);
+    assert.deepEqual(results.items, []);
   });
 
   it('throws on JMAP error in query', async () => {

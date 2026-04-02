@@ -1,4 +1,4 @@
-import { JmapClient, JmapRequest } from './jmap-client.js';
+import { JmapClient, JmapRequest, QueryResult } from './jmap-client.js';
 
 export class ContactsCalendarClient extends JmapClient {
   
@@ -12,7 +12,7 @@ export class ContactsCalendarClient extends JmapClient {
     return !!session.capabilities['urn:ietf:params:jmap:calendars'];
   }
   
-  async getContacts(limit: number = 50): Promise<any[]> {
+  async getContacts(limit: number = 50): Promise<QueryResult> {
     // Check permissions first
     const hasPermission = await this.checkContactsPermission();
     if (!hasPermission) {
@@ -20,14 +20,15 @@ export class ContactsCalendarClient extends JmapClient {
     }
 
     const session = await this.getSession();
-    
+
     // Try CardDAV namespace first, then Fastmail specific
     const request: JmapRequest = {
       using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:contacts'],
       methodCalls: [
         ['ContactCard/query', {
           accountId: session.accountId,
-          limit
+          limit,
+          calculateTotal: true
         }, 'query'],
         ['ContactCard/get', {
           accountId: session.accountId,
@@ -39,7 +40,7 @@ export class ContactsCalendarClient extends JmapClient {
 
     try {
       const response = await this.makeRequest(request);
-      return this.getListResult(response, 1);
+      return this.getQueryResult(response, 0, 1);
     } catch (error) {
       // Fallback: try to get contacts using AddressBook methods
       const fallbackRequest: JmapRequest = {
@@ -50,10 +51,11 @@ export class ContactsCalendarClient extends JmapClient {
           }, 'addressbooks']
         ]
       };
-      
+
       try {
         const fallbackResponse = await this.makeRequest(fallbackRequest);
-        return this.getListResult(fallbackResponse, 0);
+        const items = this.getListResult(fallbackResponse, 0);
+        return { items };
       } catch (fallbackError) {
         throw new Error(`Contacts not supported or accessible: ${error instanceof Error ? error.message : String(error)}. Try checking account permissions or enabling contacts API access in Fastmail settings.`);
       }
@@ -87,7 +89,7 @@ export class ContactsCalendarClient extends JmapClient {
     }
   }
 
-  async searchContacts(query: string, limit: number = 20): Promise<any[]> {
+  async searchContacts(query: string, limit: number = 20): Promise<QueryResult> {
     // Check permissions first
     const hasPermission = await this.checkContactsPermission();
     if (!hasPermission) {
@@ -95,14 +97,15 @@ export class ContactsCalendarClient extends JmapClient {
     }
 
     const session = await this.getSession();
-    
+
     const request: JmapRequest = {
       using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:contacts'],
       methodCalls: [
         ['ContactCard/query', {
           accountId: session.accountId,
           filter: { text: query },
-          limit
+          limit,
+          calculateTotal: true
         }, 'query'],
         ['ContactCard/get', {
           accountId: session.accountId,
@@ -114,7 +117,7 @@ export class ContactsCalendarClient extends JmapClient {
 
     try {
       const response = await this.makeRequest(request);
-      return this.getListResult(response, 1);
+      return this.getQueryResult(response, 0, 1);
     } catch (error) {
       throw new Error(`Contact search not supported: ${error instanceof Error ? error.message : String(error)}. Try checking account permissions or enabling contacts API access in Fastmail settings.`);
     }
@@ -147,7 +150,7 @@ export class ContactsCalendarClient extends JmapClient {
     }
   }
 
-  async getCalendarEvents(calendarId?: string, limit: number = 50): Promise<any[]> {
+  async getCalendarEvents(calendarId?: string, limit: number = 50): Promise<QueryResult> {
     // Check permissions first
     const hasPermission = await this.checkCalendarsPermission();
     if (!hasPermission) {
@@ -155,9 +158,9 @@ export class ContactsCalendarClient extends JmapClient {
     }
 
     const session = await this.getSession();
-    
+
     const filter = calendarId ? { inCalendar: calendarId } : {};
-    
+
     const request: JmapRequest = {
       using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:calendars'],
       methodCalls: [
@@ -165,7 +168,8 @@ export class ContactsCalendarClient extends JmapClient {
           accountId: session.accountId,
           filter,
           sort: [{ property: 'start', isAscending: true }],
-          limit
+          limit,
+          calculateTotal: true
         }, 'query'],
         ['CalendarEvent/get', {
           accountId: session.accountId,
@@ -177,7 +181,7 @@ export class ContactsCalendarClient extends JmapClient {
 
     try {
       const response = await this.makeRequest(request);
-      return this.getListResult(response, 1);
+      return this.getQueryResult(response, 0, 1);
     } catch (error) {
       throw new Error(`Calendar events access not supported: ${error instanceof Error ? error.message : String(error)}. Try checking account permissions or enabling calendar API access in Fastmail settings.`);
     }
