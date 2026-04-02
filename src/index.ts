@@ -8,7 +8,7 @@ import {
   McpError,
 } from '@modelcontextprotocol/sdk/types.js';
 import { FastmailAuth, FastmailConfig } from './auth.js';
-import { JmapClient } from './jmap-client.js';
+import { JmapClient, QueryResult } from './jmap-client.js';
 import { ContactsCalendarClient } from './contacts-calendar.js';
 import { CalDAVCalendarClient } from './caldav-client.js';
 import { coerceRecipients, coerceStringArray, coerceBool, redactBearerTokens, registerSecret } from './coerce.js';
@@ -137,6 +137,19 @@ function getDownloadDir(): string | undefined {
 // an unbounded/negative JMAP query).
 function clampLimit(value: unknown, fallback: number, max: number): number {
   return Math.min(Math.max(Number(value) || fallback, 1), max);
+}
+
+// When the JMAP server reports a total match count (calculateTotal: true), wrap
+// the items in a { total, items } envelope so callers can tell a truncated page
+// from a complete result. Without a total the bare array is returned unchanged,
+// keeping output byte-identical for paths that never had one (CalDAV, contacts
+// fallback).
+function formatQueryResult(result: QueryResult): string {
+  const { items, total } = result;
+  if (total != null) {
+    return JSON.stringify({ total, items }, null, 2);
+  }
+  return JSON.stringify(items, null, 2);
 }
 
 server.setRequestHandler(ListToolsRequestSchema, async () => {
@@ -1364,12 +1377,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'list_emails': {
         const { mailboxId, limit, ascending } = args as any;
         const validLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
-        const emails = await client.getEmails(mailboxId, validLimit, !!ascending);
+        const result = await client.getEmails(mailboxId, validLimit, !!ascending);
         return {
           content: [
             {
               type: 'text',
-              text: JSON.stringify(emails, null, 2),
+              text: formatQueryResult(result),
             },
           ],
         };
@@ -1629,12 +1642,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           throw new McpError(ErrorCode.InvalidParams, 'query is required');
         }
         const validLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
-        const emails = await client.searchEmails(query, validLimit, !!ascending, coerceBool(excludeDrafts) ?? false);
+        const result = await client.searchEmails(query, validLimit, !!ascending, coerceBool(excludeDrafts) ?? false);
         return {
           content: [
             {
               type: 'text',
-              text: JSON.stringify(emails, null, 2),
+              text: formatQueryResult(result),
             },
           ],
         };
@@ -1660,12 +1673,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'list_contacts': {
         const { limit } = args as any;
         const contactsClient = initializeContactsCalendarClient();
-        const contacts = await contactsClient.getContacts(clampLimit(limit, 50, 200));
+        const result = await contactsClient.getContacts(clampLimit(limit, 50, 200));
         return {
           content: [
             {
               type: 'text',
-              text: JSON.stringify(contacts, null, 2),
+              text: formatQueryResult(result),
             },
           ],
         };
@@ -1694,12 +1707,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           throw new McpError(ErrorCode.InvalidParams, 'query is required');
         }
         const contactsClient = initializeContactsCalendarClient();
-        const contacts = await contactsClient.searchContacts(query, clampLimit(limit, 20, 100));
+        const result = await contactsClient.searchContacts(query, clampLimit(limit, 20, 100));
         return {
           content: [
             {
               type: 'text',
-              text: JSON.stringify(contacts, null, 2),
+              text: formatQueryResult(result),
             },
           ],
         };
@@ -1817,12 +1830,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'get_recent_emails': {
         const { limit, mailboxName = null, ascending } = args as any;
         const client = initializeClient();
-        const emails = await client.getRecentEmails(clampLimit(limit, 10, 50), mailboxName, coerceBool(ascending) ?? false);
+        const result = await client.getRecentEmails(clampLimit(limit, 10, 50), mailboxName, coerceBool(ascending) ?? false);
         return {
           content: [
             {
               type: 'text',
-              text: JSON.stringify(emails, null, 2),
+              text: formatQueryResult(result),
             },
           ],
         };
@@ -2020,14 +2033,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const { query, from, to, subject, hasAttachment, isUnread, isPinned, mailboxId, requiredMailboxIds, excludeMailboxIds, after, before, limit, ascending } = args as any;
         const client = initializeClient();
         const validLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
-        const emails = await client.advancedSearch({
+        const result = await client.advancedSearch({
           query, from, to, subject, hasAttachment, isUnread, isPinned, mailboxId, requiredMailboxIds, excludeMailboxIds, after, before, limit: validLimit, ascending
         });
         return {
           content: [
             {
               type: 'text',
-              text: JSON.stringify(emails, null, 2),
+              text: formatQueryResult(result),
             },
           ],
         };
@@ -2313,8 +2326,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         
         // Get some recent emails to test with
         const testLimit = Math.min(Math.max(limit, 1), 10);
-        const emails = await client.getRecentEmails(testLimit, 'inbox');
-        
+        const { items: emails } = await client.getRecentEmails(testLimit, 'inbox');
+
         if (emails.length === 0) {
           return {
             content: [
