@@ -671,6 +671,64 @@ describe('sendEmail replyTo', () => {
   });
 });
 
+// ---------- sendEmail envelope recipients ----------
+
+describe('sendEmail envelope recipients', () => {
+  let client: JmapClient;
+
+  beforeEach(() => {
+    client = makeClient();
+    mock.method(client, 'getMailboxes', async () => [
+      DRAFTS_MAILBOX,
+      { id: 'mb-sent', name: 'Sent', role: 'sent' },
+    ]);
+  });
+
+  it('includes to, cc, and bcc in envelope rcptTo', async () => {
+    const makeReq = mock.method(client, 'makeRequest', async () => ({
+      methodResponses: [
+        ['Email/set', { created: { draft: { id: 'email-new' } } }, 'createEmail'],
+        ['EmailSubmission/set', { created: { submission: { id: 'sub-1' } } }, 'submitEmail'],
+      ],
+    }));
+
+    await client.sendEmail({
+      to: ['alice@example.com'],
+      cc: ['bob@example.com'],
+      bcc: ['charlie@example.com'],
+      subject: 'Test',
+      textBody: 'Hello',
+    });
+
+    const req = makeReq.mock.calls[0].arguments[0];
+    const rcptTo = req.methodCalls[1][1].create.submission.envelope.rcptTo;
+    assert.equal(rcptTo.length, 3);
+    assert.deepEqual(rcptTo[0], { email: 'alice@example.com' });
+    assert.deepEqual(rcptTo[1], { email: 'bob@example.com' });
+    assert.deepEqual(rcptTo[2], { email: 'charlie@example.com' });
+  });
+
+  it('works with only to recipients (no cc/bcc)', async () => {
+    const makeReq = mock.method(client, 'makeRequest', async () => ({
+      methodResponses: [
+        ['Email/set', { created: { draft: { id: 'email-new' } } }, 'createEmail'],
+        ['EmailSubmission/set', { created: { submission: { id: 'sub-1' } } }, 'submitEmail'],
+      ],
+    }));
+
+    await client.sendEmail({
+      to: ['alice@example.com'],
+      subject: 'Test',
+      textBody: 'Hello',
+    });
+
+    const req = makeReq.mock.calls[0].arguments[0];
+    const rcptTo = req.methodCalls[1][1].create.submission.envelope.rcptTo;
+    assert.equal(rcptTo.length, 1);
+    assert.deepEqual(rcptTo[0], { email: 'alice@example.com' });
+  });
+});
+
 // ---------- createDraft replyTo ----------
 
 describe('createDraft replyTo', () => {
