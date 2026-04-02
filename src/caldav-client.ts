@@ -92,6 +92,45 @@ export function formatICalDate(raw: string | undefined): string | undefined {
   return cleaned;
 }
 
+/**
+ * Convert an ISO 8601 datetime string to iCalendar UTC format.
+ * Handles timezone offsets by converting to UTC via Date.
+ * Preserves floating times (no offset, no Z) as-is.
+ * e.g. "2026-04-07T18:45:00+10:00" → "20260407T084500Z"
+ */
+export function toICalUTC(isoString: string): string {
+  // Floating time (no offset, no Z) — preserve as local iCal datetime
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(isoString)) {
+    return isoString.replace(/[-:]/g, '');
+  }
+  const d = new Date(isoString);
+  if (isNaN(d.getTime())) throw new Error(`Invalid date: ${isoString}`);
+  return d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+}
+
+/**
+ * Fold an iCalendar content line at 75 octets per RFC 5545 §3.1.
+ */
+export function foldICalLine(line: string): string {
+  const parts: string[] = [];
+  while (Buffer.byteLength(line, 'utf8') > 75) {
+    // Find the largest character count that fits in 75 bytes
+    let cut = 75;
+    while (cut > 0 && Buffer.byteLength(line.slice(0, cut), 'utf8') > 75) {
+      cut--;
+    }
+    // Don't split a surrogate pair (characters outside BMP like emoji)
+    if (cut > 0 && cut < line.length) {
+      const code = line.charCodeAt(cut);
+      if (code >= 0xDC00 && code <= 0xDFFF) cut--;
+    }
+    parts.push(line.slice(0, cut));
+    line = ' ' + line.slice(cut);
+  }
+  parts.push(line);
+  return parts.join('\r\n');
+}
+
 export function parseCalendarObject(obj: DAVCalendarObject): CalendarEvent {
   const vevent = extractVEvent(obj.data || '');
   const title = parseICalValue(vevent, 'SUMMARY') || 'Untitled';
@@ -117,11 +156,12 @@ export function parseCalendarObject(obj: DAVCalendarObject): CalendarEvent {
  * Reverses escaping of newlines, semicolons, commas, and backslashes.
  */
 export function unescapeICalText(value: string): string {
-  return value
-    .replace(/\\n/gi, '\n')
-    .replace(/\\;/g, ';')
-    .replace(/\\,/g, ',')
-    .replace(/\\\\/g, '\\');
+  return value.replace(/\\(\\|;|,|[nN])/g, (_, ch) => {
+    if (ch === 'n' || ch === 'N') return '\n';
+    if (ch === ',') return ',';
+    if (ch === ';') return ';';
+    return '\\';
+  });
 }
 
 /**
@@ -268,11 +308,11 @@ export class CalDAVCalendarClient {
       'BEGIN:VEVENT',
       `UID:${uid}`,
       `DTSTAMP:${now}`,
-      `DTSTART:${event.start.replace(/[-:]/g, '')}`,
-      `DTEND:${event.end.replace(/[-:]/g, '')}`,
-      `SUMMARY:${escapeICalText(event.title)}`,
-      event.description ? `DESCRIPTION:${escapeICalText(event.description)}` : '',
-      event.location ? `LOCATION:${escapeICalText(event.location)}` : '',
+      `DTSTART:${toICalUTC(event.start)}`,
+      `DTEND:${toICalUTC(event.end)}`,
+      foldICalLine(`SUMMARY:${escapeICalText(event.title)}`),
+      event.description ? foldICalLine(`DESCRIPTION:${escapeICalText(event.description)}`) : '',
+      event.location ? foldICalLine(`LOCATION:${escapeICalText(event.location)}`) : '',
       'END:VEVENT',
       'END:VCALENDAR',
     ].filter(Boolean).join('\r\n');
