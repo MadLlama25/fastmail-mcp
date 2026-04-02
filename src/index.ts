@@ -997,7 +997,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case 'list_emails': {
         const { mailboxId, limit, ascending } = args as any;
-        const validLimit = Math.min(Math.max(Number(limit) || 20, 1), 50);
+        const validLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
         const emails = await client.getEmails(mailboxId, validLimit, !!ascending);
         return {
           content: [
@@ -1221,11 +1221,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'search_emails': {
-        const { query, limit = 20, ascending } = args as any;
+        const { query, limit, ascending } = args as any;
         if (!query) {
           throw new McpError(ErrorCode.InvalidParams, 'query is required');
         }
-        const emails = await client.searchEmails(query, limit, !!ascending);
+        const validLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
+        const emails = await client.searchEmails(query, validLimit, !!ascending);
         return {
           content: [
             {
@@ -1555,8 +1556,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'advanced_search': {
         const { query, from, to, subject, hasAttachment, isUnread, isPinned, mailboxId, after, before, limit, ascending } = args as any;
         const client = initializeClient();
+        const validLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
         const emails = await client.advancedSearch({
-          query, from, to, subject, hasAttachment, isUnread, isPinned, mailboxId, after, before, limit, ascending
+          query, from, to, subject, hasAttachment, isUnread, isPinned, mailboxId, after, before, limit: validLimit, ascending
         });
         return {
           content: [

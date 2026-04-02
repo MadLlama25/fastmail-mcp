@@ -744,3 +744,23 @@ describe('updateDraft replyTo', () => {
     assert.deepEqual(emailObj.replyTo, [{ email: 'keep-me@example.com' }]);
   });
 });
+
+// ---------- version sync ----------
+
+describe('version sync', () => {
+  it('package.json, manifest.json, and index.ts all have the same version', async () => {
+    const { readFileSync } = await import('fs');
+    const { resolve: r } = await import('path');
+    const root = r(import.meta.dirname, '..');
+
+    const pkg = JSON.parse(readFileSync(r(root, 'package.json'), 'utf8'));
+    const manifest = JSON.parse(readFileSync(r(root, 'manifest.json'), 'utf8'));
+    const indexSrc = readFileSync(r(root, 'src', 'index.ts'), 'utf8');
+
+    const indexMatch = indexSrc.match(/version:\s*'([^']+)'/);
+    assert.ok(indexMatch, 'Could not find version string in index.ts');
+
+    assert.equal(pkg.version, manifest.version, 'package.json and manifest.json versions must match');
+    assert.equal(pkg.version, indexMatch[1], 'package.json and index.ts versions must match');
+  });
+});
