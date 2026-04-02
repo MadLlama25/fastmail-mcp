@@ -28,7 +28,7 @@ A Model Context Protocol (MCP) server that provides access to the Fastmail API, 
 ### Calendar Operations
 - List all calendars and calendar events
 - Get specific calendar events by ID
-- Create new calendar events with participants and details
+- Create, update, and delete calendar events
 
 ### Label vs Move Operations
 - **move_email/bulk_move**: Replaces ALL mailboxes for an email (folder behavior)
@@ -132,7 +132,7 @@ You can install this server as a Desktop Extension for Claude Desktop using the 
 
 3. Use any of the tools (e.g. `get_recent_emails`).
 
-## Available Tools (38 Total)
+## Available Tools (40 Total)
 
 **🎯 Most Popular Tools:**
 - **check_function_availability**: Check what's available and get setup guidance  
@@ -219,6 +219,10 @@ You can install this server as a Desktop Extension for Claude Desktop using the 
   - Parameters: `eventId` (required)
 - **create_calendar_event**: Create a new calendar event
   - Parameters: `calendarId` (required), `title` (required), `description` (optional), `start` (required, ISO 8601), `end` (required, ISO 8601), `location` (optional), `participants` (optional array)
+- **update_calendar_event**: Update an existing calendar event (only provided fields are changed)
+  - Parameters: `eventId` (required), `title` (optional), `description` (optional), `start` (optional, ISO 8601), `end` (optional, ISO 8601), `location` (optional)
+- **delete_calendar_event**: Delete a calendar event
+  - Parameters: `eventId` (required)
 
 ### Identity & Testing Tools
 
@@ -262,7 +266,7 @@ However, Fastmail fully supports **CalDAV** for calendar access via `caldav.fast
    export FASTMAIL_CALDAV_PASSWORD="your-app-specific-password"
    ```
 
-When these variables are set, the calendar tools (`list_calendars`, `list_calendar_events`, `get_calendar_event`, `create_calendar_event`) will automatically fall back to CalDAV if JMAP calendars are not available. When these variables are not set, the server behaves exactly as before (JMAP only).
+When these variables are set, the calendar tools (`list_calendars`, `list_calendar_events`, `get_calendar_event`, `create_calendar_event`, `update_calendar_event`, `delete_calendar_event`) will automatically fall back to CalDAV if JMAP calendars are not available. When these variables are not set, the server behaves exactly as before (JMAP only).
 
 ## Development
 

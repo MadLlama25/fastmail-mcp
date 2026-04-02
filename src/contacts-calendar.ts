@@ -259,4 +259,76 @@ export class ContactsCalendarClient extends JmapClient {
       throw new Error(`Calendar event creation not supported: ${error instanceof Error ? error.message : String(error)}. Try checking account permissions or enabling calendar API access in Fastmail settings.`);
     }
   }
+
+  async updateCalendarEvent(eventId: string, fields: {
+    title?: string;
+    description?: string;
+    start?: string;
+    end?: string;
+    location?: string;
+  }): Promise<string> {
+    const hasPermission = await this.checkCalendarsPermission();
+    if (!hasPermission) {
+      throw new Error('Calendar access not available. This account may not have JMAP calendar permissions enabled. Please check your Fastmail account settings or contact support to enable calendar API access.');
+    }
+
+    const session = await this.getSession();
+
+    const updateFields: Record<string, any> = {};
+    if (fields.title !== undefined) updateFields.title = fields.title;
+    if (fields.description !== undefined) updateFields.description = fields.description;
+    if (fields.start !== undefined) updateFields.start = fields.start;
+    if (fields.end !== undefined) updateFields.end = fields.end;
+    if (fields.location !== undefined) updateFields.location = fields.location;
+
+    const request: JmapRequest = {
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:calendars'],
+      methodCalls: [
+        ['CalendarEvent/set', {
+          accountId: session.accountId,
+          update: { [eventId]: updateFields }
+        }, 'updateEvent']
+      ]
+    };
+
+    try {
+      const response = await this.makeRequest(request);
+      const result = this.getMethodResult(response, 0);
+      if (result.notUpdated?.[eventId]) {
+        throw new Error(result.notUpdated[eventId].description || 'Update failed');
+      }
+      return eventId;
+    } catch (error) {
+      throw new Error(`Calendar event update not supported: ${error instanceof Error ? error.message : String(error)}. Try checking account permissions or enabling calendar API access in Fastmail settings.`);
+    }
+  }
+
+  async deleteCalendarEvent(eventId: string): Promise<void> {
+    const hasPermission = await this.checkCalendarsPermission();
+    if (!hasPermission) {
+      throw new Error('Calendar access not available. This account may not have JMAP calendar permissions enabled. Please check your Fastmail account settings or contact support to enable calendar API access.');
+    }
+
+    const session = await this.getSession();
+
+    const request: JmapRequest = {
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:calendars'],
+      methodCalls: [
+        ['CalendarEvent/set', {
+          accountId: session.accountId,
+          destroy: [eventId]
+        }, 'deleteEvent']
+      ]
+    };
+
+    try {
+      const response = await this.makeRequest(request);
+      const result = this.getMethodResult(response, 0);
+      if (result.notDestroyed?.[eventId]) {
+        throw new Error(result.notDestroyed[eventId].description || 'Delete failed');
+      }
+    } catch (error) {
+      throw new Error(`Calendar event deletion not supported: ${error instanceof Error ? error.message : String(error)}. Try checking account permissions or enabling calendar API access in Fastmail settings.`);
+    }
+  }
 }

@@ -563,6 +563,54 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: 'update_calendar_event',
+        description: 'Update an existing calendar event. Only provided fields are changed; omitted fields retain their current values.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            eventId: {
+              type: 'string',
+              description: 'ID of the event to update',
+            },
+            title: {
+              type: 'string',
+              description: 'New event title (optional)',
+            },
+            description: {
+              type: 'string',
+              description: 'New event description (optional)',
+            },
+            start: {
+              type: 'string',
+              description: 'New start time in ISO 8601 format (optional)',
+            },
+            end: {
+              type: 'string',
+              description: 'New end time in ISO 8601 format (optional)',
+            },
+            location: {
+              type: 'string',
+              description: 'New event location (optional)',
+            },
+          },
+          required: ['eventId'],
+        },
+      },
+      {
+        name: 'delete_calendar_event',
+        description: 'Delete a calendar event by ID',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            eventId: {
+              type: 'string',
+              description: 'ID of the event to delete',
+            },
+          },
+          required: ['eventId'],
+        },
+      },
+      {
         name: 'list_identities',
         description: 'List sending identities (email addresses that can be used for sending)',
         inputSchema: {
@@ -1358,6 +1406,48 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
       }
 
+      case 'update_calendar_event': {
+        const { eventId, title, description, start, end, location } = args as any;
+        if (!eventId) {
+          throw new McpError(ErrorCode.InvalidParams, 'eventId is required');
+        }
+        if (title === undefined && description === undefined && start === undefined && end === undefined && location === undefined) {
+          throw new McpError(ErrorCode.InvalidParams, 'At least one field to update must be provided (title, description, start, end, or location)');
+        }
+        const fields = { title, description, start, end, location };
+        try {
+          const contactsClient = initializeContactsCalendarClient();
+          await contactsClient.updateCalendarEvent(eventId, fields);
+          return { content: [{ type: 'text', text: `Calendar event updated successfully. Event ID: ${eventId}` }] };
+        } catch {
+          const davClient = initializeCalDAVClient();
+          if (!davClient) {
+            throw new McpError(ErrorCode.InvalidRequest, 'JMAP calendars not available and CalDAV not configured. Set FASTMAIL_CALDAV_USERNAME and FASTMAIL_CALDAV_PASSWORD to use CalDAV.');
+          }
+          await davClient.updateCalendarEvent(eventId, fields);
+          return { content: [{ type: 'text', text: `Calendar event updated via CalDAV. Event ID: ${eventId}` }] };
+        }
+      }
+
+      case 'delete_calendar_event': {
+        const { eventId } = args as any;
+        if (!eventId) {
+          throw new McpError(ErrorCode.InvalidParams, 'eventId is required');
+        }
+        try {
+          const contactsClient = initializeContactsCalendarClient();
+          await contactsClient.deleteCalendarEvent(eventId);
+          return { content: [{ type: 'text', text: `Calendar event deleted successfully. Event ID: ${eventId}` }] };
+        } catch {
+          const davClient = initializeCalDAVClient();
+          if (!davClient) {
+            throw new McpError(ErrorCode.InvalidRequest, 'JMAP calendars not available and CalDAV not configured. Set FASTMAIL_CALDAV_USERNAME and FASTMAIL_CALDAV_PASSWORD to use CalDAV.');
+          }
+          await davClient.deleteCalendarEvent(eventId);
+          return { content: [{ type: 'text', text: `Calendar event deleted via CalDAV. Event ID: ${eventId}` }] };
+        }
+      }
+
       case 'list_identities': {
         const client = initializeClient();
         const identities = await client.getIdentities();
@@ -1765,7 +1855,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           },
           calendar: {
             available: !!session.capabilities['urn:ietf:params:jmap:calendars'],
-            functions: ['list_calendars', 'list_calendar_events', 'get_calendar_event', 'create_calendar_event'],
+            functions: ['list_calendars', 'list_calendar_events', 'get_calendar_event', 'create_calendar_event', 'update_calendar_event', 'delete_calendar_event'],
             note: session.capabilities['urn:ietf:params:jmap:calendars'] ? 
               'Calendar is available' : 
               'Calendar access not available - may require enabling in Fastmail account settings',

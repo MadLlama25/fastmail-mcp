@@ -217,7 +217,11 @@ export class CalDAVCalendarClient {
     return allEvents.slice(0, limit);
   }
 
-  async getCalendarEventById(eventId: string): Promise<CalendarEvent | null> {
+  /**
+   * Find the raw DAVCalendarObject by UID or URL.
+   * Needed for update/delete which require the original object with url/etag.
+   */
+  private async findCalendarObjectByUID(eventId: string): Promise<DAVCalendarObject | null> {
     const client = await this.getClient();
 
     if (!this.calendars) {
@@ -230,12 +234,17 @@ export class CalDAVCalendarClient {
         const vevent = extractVEvent(obj.data || '');
         const uid = parseICalValue(vevent, 'UID');
         if (uid === eventId || obj.url === eventId) {
-          return parseCalendarObject(obj);
+          return obj;
         }
       }
     }
 
     return null;
+  }
+
+  async getCalendarEventById(eventId: string): Promise<CalendarEvent | null> {
+    const obj = await this.findCalendarObjectByUID(eventId);
+    return obj ? parseCalendarObject(obj) : null;
   }
 
   async createCalendarEvent(event: {
@@ -284,5 +293,65 @@ export class CalDAVCalendarClient {
     });
 
     return uid;
+  }
+
+  async updateCalendarEvent(eventId: string, fields: {
+    title?: string;
+    description?: string;
+    start?: string;
+    end?: string;
+    location?: string;
+  }): Promise<string> {
+    const client = await this.getClient();
+    const obj = await this.findCalendarObjectByUID(eventId);
+    if (!obj) {
+      throw new Error(`Calendar event not found: ${eventId}`);
+    }
+
+    const vevent = extractVEvent(obj.data || '');
+    const existingUid = parseICalValue(vevent, 'UID') || eventId;
+    const existingStart = parseICalValue(vevent, 'DTSTART');
+    const existingEnd = parseICalValue(vevent, 'DTEND');
+    const existingSummary = parseICalValue(vevent, 'SUMMARY');
+    const existingDescription = parseICalValue(vevent, 'DESCRIPTION');
+    const existingLocation = parseICalValue(vevent, 'LOCATION');
+
+    const title = fields.title !== undefined ? escapeICalText(fields.title) : existingSummary || '';
+    const description = fields.description !== undefined ? escapeICalText(fields.description) : existingDescription;
+    const location = fields.location !== undefined ? escapeICalText(fields.location) : existingLocation;
+    const startVal = fields.start !== undefined ? toICalUTC(fields.start) : existingStart || '';
+    const endVal = fields.end !== undefined ? toICalUTC(fields.end) : existingEnd || '';
+
+    const now = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+    const ical = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//fastmail-mcp//CalDAV//EN',
+      'BEGIN:VEVENT',
+      `UID:${existingUid}`,
+      `DTSTAMP:${now}`,
+      `DTSTART:${startVal}`,
+      `DTEND:${endVal}`,
+      foldICalLine(`SUMMARY:${title}`),
+      description ? foldICalLine(`DESCRIPTION:${description}`) : '',
+      location ? foldICalLine(`LOCATION:${location}`) : '',
+      'END:VEVENT',
+      'END:VCALENDAR',
+    ].filter(Boolean).join('\r\n');
+
+    obj.data = ical;
+    await client.updateCalendarObject({ calendarObject: obj });
+
+    return existingUid;
+  }
+
+  async deleteCalendarEvent(eventId: string): Promise<void> {
+    const client = await this.getClient();
+    const obj = await this.findCalendarObjectByUID(eventId);
+    if (!obj) {
+      throw new Error(`Calendar event not found: ${eventId}`);
+    }
+
+    await client.deleteCalendarObject({ calendarObject: obj });
   }
 }
