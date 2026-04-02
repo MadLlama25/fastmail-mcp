@@ -1,7 +1,7 @@
 import { describe, it, beforeEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { homedir } from 'os';
-import { resolve } from 'path';
+import { resolve, join } from 'path';
 import { JmapClient } from './jmap-client.js';
 import { FastmailAuth } from './auth.js';
 
@@ -542,13 +542,15 @@ describe('validateSavePath', () => {
   const allowedDir = resolve(homedir(), 'Downloads', 'fastmail-mcp');
 
   it('accepts paths within the allowed directory', () => {
-    const result = JmapClient.validateSavePath(`${allowedDir}/photo.jpg`);
-    assert.equal(result, `${allowedDir}/photo.jpg`);
+    const input = join(allowedDir, 'photo.jpg');
+    const result = JmapClient.validateSavePath(input);
+    assert.equal(result, input);
   });
 
   it('accepts paths in subdirectories', () => {
-    const result = JmapClient.validateSavePath(`${allowedDir}/andrew/assets/logo.png`);
-    assert.equal(result, `${allowedDir}/andrew/assets/logo.png`);
+    const input = join(allowedDir, 'andrew', 'assets', 'logo.png');
+    const result = JmapClient.validateSavePath(input);
+    assert.equal(result, input);
   });
 
   it('rejects paths outside the allowed directory', () => {
@@ -592,13 +594,14 @@ describe('validateSavePath', () => {
   });
 
   it('accepts paths within a custom download directory', () => {
-    const customDir = '/tmp/my-downloads';
-    const result = JmapClient.validateSavePath(`${customDir}/photo.jpg`, customDir);
-    assert.equal(result, `${customDir}/photo.jpg`);
+    const customDir = resolve('tmp', 'my-downloads');
+    const input = join(customDir, 'photo.jpg');
+    const result = JmapClient.validateSavePath(input, customDir);
+    assert.equal(result, input);
   });
 
   it('rejects paths outside a custom download directory', () => {
-    const customDir = '/tmp/my-downloads';
+    const customDir = resolve('tmp', 'my-downloads');
     assert.throws(
       () => JmapClient.validateSavePath('/etc/passwd', customDir),
       (err: Error) => {
