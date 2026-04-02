@@ -104,12 +104,36 @@ export function parseCalendarObject(obj: DAVCalendarObject): CalendarEvent {
   return {
     id: uid,
     url: obj.url || '',
-    title,
-    description: description?.replace(/\\n/g, '\n').replace(/\\,/g, ',') || undefined,
+    title: unescapeICalText(title),
+    description: description ? unescapeICalText(description) : undefined,
     start: formatICalDate(rawStart),
     end: formatICalDate(rawEnd),
-    location: location?.replace(/\\,/g, ',') || undefined,
+    location: location ? unescapeICalText(location) : undefined,
   };
+}
+
+/**
+ * Unescape an iCalendar text value (RFC 5545 §3.3.11).
+ * Reverses escaping of newlines, semicolons, commas, and backslashes.
+ */
+export function unescapeICalText(value: string): string {
+  return value
+    .replace(/\\n/gi, '\n')
+    .replace(/\\;/g, ';')
+    .replace(/\\,/g, ',')
+    .replace(/\\\\/g, '\\');
+}
+
+/**
+ * Escape a text value for use in an iCalendar property (RFC 5545 §3.3.11).
+ * Backslashes, newlines, commas, and semicolons must be escaped.
+ */
+export function escapeICalText(value: string): string {
+  return value
+    .replace(/\\/g, '\\\\')
+    .replace(/;/g, '\\;')
+    .replace(/,/g, '\\,')
+    .replace(/\r?\n/g, '\\n');
 }
 
 export class CalDAVCalendarClient {
@@ -246,9 +270,9 @@ export class CalDAVCalendarClient {
       `DTSTAMP:${now}`,
       `DTSTART:${event.start.replace(/[-:]/g, '')}`,
       `DTEND:${event.end.replace(/[-:]/g, '')}`,
-      `SUMMARY:${event.title}`,
-      event.description ? `DESCRIPTION:${event.description}` : '',
-      event.location ? `LOCATION:${event.location}` : '',
+      `SUMMARY:${escapeICalText(event.title)}`,
+      event.description ? `DESCRIPTION:${escapeICalText(event.description)}` : '',
+      event.location ? `LOCATION:${escapeICalText(event.location)}` : '',
       'END:VEVENT',
       'END:VCALENDAR',
     ].filter(Boolean).join('\r\n');

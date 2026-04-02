@@ -5,6 +5,7 @@ import {
   parseICalValue,
   formatICalDate,
   parseCalendarObject,
+  escapeICalText,
   CalDAVCalendarClient,
 } from './caldav-client.js';
 
@@ -222,6 +223,49 @@ describe('parseCalendarObject', () => {
     assert.equal(event.description, undefined);
     assert.equal(event.location, undefined);
     assert.equal(event.end, undefined);
+  });
+});
+
+describe('escapeICalText', () => {
+  it('escapes backslashes', () => {
+    assert.equal(escapeICalText('path\\to\\file'), 'path\\\\to\\\\file');
+  });
+
+  it('escapes semicolons', () => {
+    assert.equal(escapeICalText('a;b;c'), 'a\\;b\\;c');
+  });
+
+  it('escapes commas', () => {
+    assert.equal(escapeICalText('Room A, Building 1'), 'Room A\\, Building 1');
+  });
+
+  it('escapes newlines', () => {
+    assert.equal(escapeICalText('line1\nline2'), 'line1\\nline2');
+    assert.equal(escapeICalText('line1\r\nline2'), 'line1\\nline2');
+  });
+
+  it('leaves plain text unchanged', () => {
+    assert.equal(escapeICalText('Team Standup'), 'Team Standup');
+  });
+
+  it('prevents ICS property injection via CRLF', () => {
+    const malicious = 'Meeting\r\nATTENDEE:mailto:attacker@evil.com';
+    const escaped = escapeICalText(malicious);
+    // No literal newlines means the injected ATTENDEE stays inside the text value,
+    // not on its own ICS property line
+    assert.ok(!escaped.includes('\n'), 'escaped text must not contain literal newlines');
+    assert.ok(!escaped.includes('\r'), 'escaped text must not contain literal carriage returns');
+    assert.equal(escaped, 'Meeting\\nATTENDEE:mailto:attacker@evil.com');
+  });
+
+  it('prevents injection of extra VEVENT components', () => {
+    const malicious = 'Meeting\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nSUMMARY:Injected';
+    const escaped = escapeICalText(malicious);
+    // No literal newlines means the injected properties stay inside the SUMMARY value
+    assert.ok(!escaped.includes('\n'), 'escaped text must not contain literal newlines');
+    assert.ok(!escaped.includes('\r'), 'escaped text must not contain literal carriage returns');
+    // The entire payload is on one logical ICS line, so END:VEVENT can't terminate the block
+    assert.ok(escaped.startsWith('Meeting\\n'), 'newlines should be escaped, not literal');
   });
 });
 
