@@ -6,6 +6,9 @@ import {
   formatICalDate,
   parseCalendarObject,
   escapeICalText,
+  unescapeICalText,
+  toICalUTC,
+  foldICalLine,
   CalDAVCalendarClient,
 } from './caldav-client.js';
 
@@ -223,6 +226,140 @@ describe('parseCalendarObject', () => {
     assert.equal(event.description, undefined);
     assert.equal(event.location, undefined);
     assert.equal(event.end, undefined);
+  });
+});
+
+describe('toICalUTC', () => {
+  it('converts timezone offset to UTC', () => {
+    assert.equal(toICalUTC('2026-04-07T18:45:00+10:00'), '20260407T084500Z');
+  });
+
+  it('converts negative timezone offset to UTC', () => {
+    assert.equal(toICalUTC('2026-04-07T08:45:00-05:00'), '20260407T134500Z');
+  });
+
+  it('handles UTC input (Z suffix)', () => {
+    assert.equal(toICalUTC('2026-04-07T08:45:00Z'), '20260407T084500Z');
+  });
+
+  it('preserves floating time (no offset) without converting to UTC', () => {
+    assert.equal(toICalUTC('2026-04-07T18:45:00'), '20260407T184500');
+  });
+
+  it('throws on invalid date input', () => {
+    assert.throws(() => toICalUTC('not-a-date'), /Invalid date: not-a-date/);
+  });
+
+  it('handles midnight boundary crossing', () => {
+    assert.equal(toICalUTC('2026-04-07T23:55:00+12:00'), '20260407T115500Z');
+  });
+});
+
+describe('foldICalLine', () => {
+  it('returns short lines unchanged', () => {
+    assert.equal(foldICalLine('SUMMARY:Short'), 'SUMMARY:Short');
+  });
+
+  it('folds lines longer than 75 octets', () => {
+    const long = 'DESCRIPTION:' + 'x'.repeat(80);
+    const folded = foldICalLine(long);
+    const lines = folded.split('\r\n');
+    assert.ok(Buffer.byteLength(lines[0], 'utf8') <= 75);
+    assert.ok(lines[1].startsWith(' '));
+  });
+
+  it('folds very long lines into multiple segments', () => {
+    const long = 'DESCRIPTION:' + 'y'.repeat(200);
+    const folded = foldICalLine(long);
+    const lines = folded.split('\r\n');
+    assert.ok(lines.length >= 3);
+    for (let i = 1; i < lines.length; i++) {
+      assert.ok(lines[i].startsWith(' '));
+    }
+  });
+
+  it('keeps every segment within 75 octets', () => {
+    const long = 'DESCRIPTION:' + 'z'.repeat(200);
+    const folded = foldICalLine(long);
+    const lines = folded.split('\r\n');
+    for (const line of lines) {
+      assert.ok(Buffer.byteLength(line, 'utf8') <= 75);
+    }
+  });
+
+  it('folds multi-byte characters without exceeding 75 octets', () => {
+    const long = 'LOCATION:' + '📍'.repeat(20);
+    const folded = foldICalLine(long);
+    const lines = folded.split('\r\n');
+    assert.ok(lines.length >= 2);
+    for (const line of lines) {
+      assert.ok(Buffer.byteLength(line, 'utf8') <= 75,
+        `Line exceeds 75 octets: ${Buffer.byteLength(line, 'utf8')} bytes`);
+    }
+  });
+});
+
+describe('unescapeICalText', () => {
+  it('unescapes literal \\n to newline', () => {
+    assert.equal(unescapeICalText('Line one\\nLine two'), 'Line one\nLine two');
+  });
+
+  it('unescapes commas', () => {
+    assert.equal(unescapeICalText('Room A\\, Building 1'), 'Room A, Building 1');
+  });
+
+  it('unescapes semicolons', () => {
+    assert.equal(unescapeICalText('a\\;b\\;c'), 'a;b;c');
+  });
+
+  it('unescapes backslashes', () => {
+    assert.equal(unescapeICalText('path\\\\to\\\\file'), 'path\\to\\file');
+  });
+
+  it('round-trips with escapeICalText', () => {
+    const original = 'Meet; discuss, plan\nPath\\to\\file';
+    assert.equal(unescapeICalText(escapeICalText(original)), original);
+  });
+
+  it('handles literal backslash followed by n (not a newline)', () => {
+    assert.equal(unescapeICalText('\\\\n'), '\\n');
+  });
+
+  it('handles literal backslash followed by comma', () => {
+    assert.equal(unescapeICalText('\\\\,'), '\\,');
+  });
+});
+
+describe('iCal create/parse round-trip', () => {
+  it('round-trips special characters through create and parse', () => {
+    const title = 'Meeting; discuss, plan';
+    const description = 'Line one\nLine two\nPath\\to\\file; note, important';
+    const location = 'Room A, Building 1; Floor 2';
+
+    const uid = 'test-roundtrip@fastmail-mcp';
+    const now = '20260407T000000Z';
+    const ical = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//fastmail-mcp//CalDAV//EN',
+      'BEGIN:VEVENT',
+      `UID:${uid}`,
+      `DTSTAMP:${now}`,
+      `DTSTART:${toICalUTC('2026-04-07T18:45:00+10:00')}`,
+      `DTEND:${toICalUTC('2026-04-07T20:00:00+10:00')}`,
+      foldICalLine(`SUMMARY:${escapeICalText(title)}`),
+      foldICalLine(`DESCRIPTION:${escapeICalText(description)}`),
+      foldICalLine(`LOCATION:${escapeICalText(location)}`),
+      'END:VEVENT',
+      'END:VCALENDAR',
+    ].filter(Boolean).join('\r\n');
+
+    const event = parseCalendarObject({ data: ical, url: 'https://example.com/cal/test.ics' });
+    assert.equal(event.title, title);
+    assert.equal(event.description, description);
+    assert.equal(event.location, location);
+    assert.equal(event.start, '2026-04-07T08:45:00Z');
+    assert.equal(event.end, '2026-04-07T10:00:00Z');
   });
 });
 
