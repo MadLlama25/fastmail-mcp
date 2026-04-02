@@ -314,7 +314,11 @@ export class JmapClient {
               identityId: selectedIdentity.id,
               envelope: {
                 mailFrom: { email: fromEmail },
-                rcptTo: email.to.map(addr => ({ email: addr }))
+                rcptTo: [
+                  ...email.to.map(addr => ({ email: addr })),
+                  ...(email.cc || []).map(addr => ({ email: addr })),
+                  ...(email.bcc || []).map(addr => ({ email: addr })),
+                ]
               }
             }
           },
