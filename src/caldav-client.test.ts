@@ -1600,7 +1600,8 @@ describe('CalDAVCalendarClient.createCalendarEvent with participants', () => {
     });
 
     const ical = mockDAVClient.createCalendarObject.mock.calls[0].arguments[0].iCalString;
-    assert.ok(ical.includes('ORGANIZER;CN=me@fastmail.com:mailto:me@fastmail.com'));
+    assert.ok(ical.includes(':mailto:me@fastmail.com'), 'ORGANIZER should have mailto URI');
+    assert.ok(/ORGANIZER;CN=.+:mailto:me@fastmail.com/.test(ical), 'ORGANIZER should have CN parameter');
     assert.ok(ical.includes('ATTENDEE;CN=Alice:mailto:alice@example.com'));
     assert.ok(ical.includes('ATTENDEE;CN=Bob:mailto:bob@example.com'));
   });

@@ -1,4 +1,10 @@
 import { DAVClient, DAVCalendar, DAVCalendarObject } from 'tsdav';
+// rrule is used for RRULE expansion when detecting orphaned exception VEVENTs
+// during recurring event time changes. This allows selective pruning — only
+// exceptions whose RECURRENCE-ID no longer matches a valid occurrence are removed.
+// If this dependency is undesirable, the alternative is to remove ALL exception
+// VEVENTs when start/end changes on a recurring event (matching Google Calendar
+// behavior). The rrule package has a single transitive dependency (tslib).
 import rruleLib from 'rrule';
 const { rrulestr } = rruleLib;
 
