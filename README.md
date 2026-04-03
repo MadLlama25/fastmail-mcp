@@ -213,12 +213,21 @@ You can install this server as a Desktop Extension for Claude Desktop using the 
 ### Calendar Tools
 
 - **list_calendars**: List all calendars
-- **list_calendar_events**: List calendar events
-  - Parameters: `calendarId` (optional), `limit` (default: 50)
-- **get_calendar_event**: Get a specific calendar event by ID
+- **list_calendar_events**: List calendar events (core fields only — no participants for token efficiency)
+  - Parameters: `calendarId` (optional), `startDate` (optional, ISO 8601), `endDate` (optional, ISO 8601), `limit` (default: 50)
+- **get_calendar_event**: Get a specific calendar event by ID. Returns organizer and participants when available.
   - Parameters: `eventId` (required)
-- **create_calendar_event**: Create a new calendar event
-  - Parameters: `calendarId` (required), `title` (required), `description` (optional), `start` (required, ISO 8601), `end` (required, ISO 8601), `location` (optional), `participants` (optional array)
+- **create_calendar_event**: Create a new calendar event. Supports date-only (e.g. `2026-04-01`) for all-day events. DTEND is exclusive per RFC 5545 — a one-day event on April 1 needs `end: "2026-04-02"`.
+  - Parameters: `calendarId` (required), `title` (required), `description` (optional), `start` (required, ISO 8601 or date-only), `end` (required, ISO 8601 or date-only), `location` (optional), `participants` (optional array of `{email, name?}`)
+- **update_calendar_event**: Patch an existing calendar event. Preserves all existing data (attendees, reminders, recurrence rules, etc.) not being changed. Floating times (no Z/offset) preserve the original timezone. WARNING: providing `participants` replaces ALL existing attendee data; `participants: []` removes all attendees.
+  - Parameters: `eventId` (required), `title`, `description`, `start`, `end`, `location`, `participants` (array of `{email, name?}`), `confirmRecurring` (boolean)
+- **delete_calendar_event**: Delete a calendar event
+  - Parameters: `eventId` (required)
+
+#### Calendar known limitations
+
+- **Recurring events**: Only "all events" modification is supported (master VEVENT). "This event only" or "this and future events" are not supported. Changing start/end on recurring events with exception overrides requires `confirmRecurring: true` — orphaned exceptions are pruned to prevent server errors.
+- **Attendee parameters**: RSVP, ROLE, CUTYPE and other attendee parameters are parsed on read but not settable on create/update — only `email` and `name` are accepted.
 
 ### Identity & Testing Tools
 
@@ -248,7 +257,7 @@ Fastmail applies rate limits to API requests. The server handles standard rate l
 
 Fastmail does not currently expose calendar access via JMAP API tokens — the `urn:ietf:params:jmap:calendars` scope is not available because the JMAP Calendars specification is still an IETF Internet-Draft ([draft-ietf-jmap-calendars](https://datatracker.ietf.org/doc/draft-ietf-jmap-calendars/)). Fastmail has stated they will add JMAP calendar support once the spec becomes an RFC, but there is no public timeline.
 
-However, Fastmail fully supports **CalDAV** for calendar access via `caldav.fastmail.com`. This server automatically falls back to CalDAV when JMAP calendar access is unavailable.
+However, Fastmail fully supports **CalDAV** for calendar access via `caldav.fastmail.com`. All calendar tools use CalDAV directly.
 
 ### Setup
 
@@ -260,9 +269,11 @@ However, Fastmail fully supports **CalDAV** for calendar access via `caldav.fast
    ```bash
    export FASTMAIL_CALDAV_USERNAME="your-email@fastmail.com"
    export FASTMAIL_CALDAV_PASSWORD="your-app-specific-password"
+   # Optional: display name for ORGANIZER when creating events with participants
+   export FASTMAIL_CALDAV_DISPLAY_NAME="Your Name"
    ```
 
-When these variables are set, the calendar tools (`list_calendars`, `list_calendar_events`, `get_calendar_event`, `create_calendar_event`) will automatically fall back to CalDAV if JMAP calendars are not available. When these variables are not set, the server behaves exactly as before (JMAP only).
+When these variables are set, all calendar tools are available. When they are not set, calendar tools will return an error with setup instructions.
 
 ## Development
 
