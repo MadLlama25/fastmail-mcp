@@ -505,7 +505,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'get_calendar_event',
-        description: 'Get a specific calendar event by ID',
+        description: 'Get a specific calendar event by ID. Returns organizer and participants when available.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -519,7 +519,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'create_calendar_event',
-        description: 'Create a new calendar event',
+        description: 'Create a new calendar event. Supports date-only (e.g. 2026-04-01) for all-day events. DTEND is exclusive per RFC 5545 — a one-day event on April 1 needs end: 2026-04-02.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -537,11 +537,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             start: {
               type: 'string',
-              description: 'Start time in ISO 8601 format',
+              description: 'Start time in ISO 8601 format (e.g. 2026-04-07T14:00:00Z) or date-only for all-day events (e.g. 2026-04-07)',
             },
             end: {
               type: 'string',
-              description: 'End time in ISO 8601 format',
+              description: 'End time in ISO 8601 format. For all-day events, DTEND is exclusive — a one-day event on April 1 requires end: 2026-04-02',
             },
             location: {
               type: 'string',
@@ -552,14 +552,79 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               items: {
                 type: 'object',
                 properties: {
-                  email: { type: 'string' },
-                  name: { type: 'string' }
-                }
+                  email: { type: 'string', description: 'Participant email address' },
+                  name: { type: 'string', description: 'Participant display name (optional)' }
+                },
+                required: ['email'],
               },
-              description: 'Event participants (optional)',
+              description: 'Event participants (optional). Automatically adds ORGANIZER from CalDAV username.',
             },
           },
           required: ['calendarId', 'title', 'start', 'end'],
+        },
+      },
+      {
+        name: 'update_calendar_event',
+        description: 'Update an existing calendar event. Preserves all existing data (attendees, reminders, recurrence rules, etc.) not being changed. Floating times preserve the original timezone; explicit UTC/offset times convert to UTC. WARNING: providing participants replaces ALL existing attendee data (acceptance status, roles, etc.). participants: [] removes all attendees.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            eventId: {
+              type: 'string',
+              description: 'ID of the event to update',
+            },
+            title: {
+              type: 'string',
+              description: 'New event title',
+            },
+            description: {
+              type: 'string',
+              description: 'New event description',
+            },
+            start: {
+              type: 'string',
+              description: 'New start time in ISO 8601 format. Floating times (no Z/offset) preserve original timezone',
+            },
+            end: {
+              type: 'string',
+              description: 'New end time in ISO 8601 format. DTEND is exclusive per RFC 5545',
+            },
+            location: {
+              type: 'string',
+              description: 'New event location',
+            },
+            participants: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  email: { type: 'string', description: 'Participant email address' },
+                  name: { type: 'string', description: 'Participant display name (optional)' }
+                },
+                required: ['email'],
+              },
+              description: 'Replaces ALL existing attendees. Empty array removes all attendees. Omit to preserve existing attendees.',
+            },
+            confirmRecurring: {
+              type: 'boolean',
+              description: 'Required when changing start/end on a recurring event with exceptions. Acknowledges that orphaned exception overrides will be removed.',
+            },
+          },
+          required: ['eventId'],
+        },
+      },
+      {
+        name: 'delete_calendar_event',
+        description: 'Delete a calendar event by ID',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            eventId: {
+              type: 'string',
+              description: 'ID of the event to delete',
+            },
+          },
+          required: ['eventId'],
         },
       },
       {
@@ -1284,36 +1349,34 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
+      // Calendar operations use CalDAV directly.
+      // JMAP Calendars: spec not yet finalized, Fastmail has not enabled JMAP calendar support.
+      // Existing JMAP calendar code in contacts-calendar.ts has known bugs and must not be used.
+      // When Fastmail enables JMAP calendars: re-enable the path, fix to match finalized spec,
+      // do a parity pass with CalDAV implementation, and test against live Fastmail.
+      // CalDAV tests should be structured so they can serve as a basis for JMAP tests later.
+
       case 'list_calendars': {
-        try {
-          const contactsClient = initializeContactsCalendarClient();
-          const calendars = await contactsClient.getCalendars();
-          return { content: [{ type: 'text', text: JSON.stringify(calendars, null, 2) }] };
-        } catch {
-          // JMAP calendars not available, try CalDAV
-          const davClient = initializeCalDAVClient();
-          if (!davClient) {
-            throw new McpError(ErrorCode.InvalidRequest, 'JMAP calendars not available and CalDAV not configured. Set FASTMAIL_CALDAV_USERNAME and FASTMAIL_CALDAV_PASSWORD to use CalDAV.');
-          }
-          const calendars = await davClient.getCalendars();
-          return { content: [{ type: 'text', text: JSON.stringify(calendars, null, 2) }] };
+        const davClient = initializeCalDAVClient();
+        if (!davClient) {
+          throw new McpError(ErrorCode.InvalidRequest, 'CalDAV not configured. Set FASTMAIL_CALDAV_USERNAME and FASTMAIL_CALDAV_PASSWORD.');
         }
+        const calendars = await davClient.getCalendars();
+        return { content: [{ type: 'text', text: JSON.stringify(calendars, null, 2) }] };
       }
 
       case 'list_calendar_events': {
         const { calendarId, limit = 50, startDate, endDate } = args as any;
-        try {
-          const contactsClient = initializeContactsCalendarClient();
-          const events = await contactsClient.getCalendarEvents(calendarId, limit);
-          return { content: [{ type: 'text', text: JSON.stringify(events, null, 2) }] };
-        } catch {
-          const davClient = initializeCalDAVClient();
-          if (!davClient) {
-            throw new McpError(ErrorCode.InvalidRequest, 'JMAP calendars not available and CalDAV not configured. Set FASTMAIL_CALDAV_USERNAME and FASTMAIL_CALDAV_PASSWORD to use CalDAV.');
-          }
-          const events = await davClient.getCalendarEvents(calendarId, limit, startDate, endDate);
-          return { content: [{ type: 'text', text: JSON.stringify(events, null, 2) }] };
+        // JMAP Calendars: disabled — spec not yet finalized, Fastmail has not enabled support.
+        // Existing JMAP calendar code in contacts-calendar.ts has known bugs.
+        // When Fastmail enables JMAP calendars: re-enable, fix to match finalized spec,
+        // do a parity pass with CalDAV implementation, and test against live Fastmail.
+        const davClient = initializeCalDAVClient();
+        if (!davClient) {
+          throw new McpError(ErrorCode.InvalidRequest, 'CalDAV not configured. Set FASTMAIL_CALDAV_USERNAME and FASTMAIL_CALDAV_PASSWORD.');
         }
+        const events = await davClient.getCalendarEvents(calendarId, limit, startDate, endDate);
+        return { content: [{ type: 'text', text: JSON.stringify(events, null, 2) }] };
       }
 
       case 'get_calendar_event': {
@@ -1321,18 +1384,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (!eventId) {
           throw new McpError(ErrorCode.InvalidParams, 'eventId is required');
         }
-        try {
-          const contactsClient = initializeContactsCalendarClient();
-          const event = await contactsClient.getCalendarEventById(eventId);
-          return { content: [{ type: 'text', text: JSON.stringify(event, null, 2) }] };
-        } catch {
-          const davClient = initializeCalDAVClient();
-          if (!davClient) {
-            throw new McpError(ErrorCode.InvalidRequest, 'JMAP calendars not available and CalDAV not configured. Set FASTMAIL_CALDAV_USERNAME and FASTMAIL_CALDAV_PASSWORD to use CalDAV.');
-          }
-          const event = await davClient.getCalendarEventById(eventId);
-          return { content: [{ type: 'text', text: JSON.stringify(event, null, 2) }] };
+        const davClient = initializeCalDAVClient();
+        if (!davClient) {
+          throw new McpError(ErrorCode.InvalidRequest, 'CalDAV not configured. Set FASTMAIL_CALDAV_USERNAME and FASTMAIL_CALDAV_PASSWORD.');
         }
+        const event = await davClient.getCalendarEventById(eventId);
+        return { content: [{ type: 'text', text: JSON.stringify(event, null, 2) }] };
       }
 
       case 'create_calendar_event': {
@@ -1340,22 +1397,44 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (!calendarId || !title || !start || !end) {
           throw new McpError(ErrorCode.InvalidParams, 'calendarId, title, start, and end are required');
         }
-        try {
-          const contactsClient = initializeContactsCalendarClient();
-          const eventId = await contactsClient.createCalendarEvent({
-            calendarId, title, description, start, end, location, participants,
-          });
-          return { content: [{ type: 'text', text: `Calendar event created successfully. Event ID: ${eventId}` }] };
-        } catch {
-          const davClient = initializeCalDAVClient();
-          if (!davClient) {
-            throw new McpError(ErrorCode.InvalidRequest, 'JMAP calendars not available and CalDAV not configured. Set FASTMAIL_CALDAV_USERNAME and FASTMAIL_CALDAV_PASSWORD to use CalDAV.');
-          }
-          const eventId = await davClient.createCalendarEvent({
-            calendarId, title, description, start, end, location,
-          });
-          return { content: [{ type: 'text', text: `Calendar event created via CalDAV. Event ID: ${eventId}` }] };
+        const davClient = initializeCalDAVClient();
+        if (!davClient) {
+          throw new McpError(ErrorCode.InvalidRequest, 'CalDAV not configured. Set FASTMAIL_CALDAV_USERNAME and FASTMAIL_CALDAV_PASSWORD.');
         }
+        const eventId = await davClient.createCalendarEvent({
+          calendarId, title, description, start, end, location, participants,
+        });
+        return { content: [{ type: 'text', text: `Calendar event created. Event ID: ${eventId}` }] };
+      }
+
+      case 'update_calendar_event': {
+        const { eventId, title, description, start, end, location, participants, confirmRecurring } = args as any;
+        if (!eventId) {
+          throw new McpError(ErrorCode.InvalidParams, 'eventId is required');
+        }
+        if (title === undefined && description === undefined && start === undefined && end === undefined && location === undefined && participants === undefined) {
+          throw new McpError(ErrorCode.InvalidParams, 'At least one field to update must be provided (title, description, start, end, location, or participants)');
+        }
+        const davClient = initializeCalDAVClient();
+        if (!davClient) {
+          throw new McpError(ErrorCode.InvalidRequest, 'CalDAV not configured. Set FASTMAIL_CALDAV_USERNAME and FASTMAIL_CALDAV_PASSWORD.');
+        }
+        const fields = { title, description, start, end, location, participants, confirmRecurring };
+        await davClient.updateCalendarEvent(eventId, fields);
+        return { content: [{ type: 'text', text: `Calendar event updated. Event ID: ${eventId}` }] };
+      }
+
+      case 'delete_calendar_event': {
+        const { eventId } = args as any;
+        if (!eventId) {
+          throw new McpError(ErrorCode.InvalidParams, 'eventId is required');
+        }
+        const davClient = initializeCalDAVClient();
+        if (!davClient) {
+          throw new McpError(ErrorCode.InvalidRequest, 'CalDAV not configured. Set FASTMAIL_CALDAV_USERNAME and FASTMAIL_CALDAV_PASSWORD.');
+        }
+        await davClient.deleteCalendarEvent(eventId);
+        return { content: [{ type: 'text', text: `Calendar event deleted. Event ID: ${eventId}` }] };
       }
 
       case 'list_identities': {
