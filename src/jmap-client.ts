@@ -698,18 +698,22 @@ export class JmapClient {
     return submissionId;
   }
 
-  async getRecentEmails(limit: number = 10, mailboxName: string = 'inbox', ascending: boolean = false): Promise<any[]> {
+  async getRecentEmails(limit: number = 10, mailboxName: string | null = null, ascending: boolean = false): Promise<any[]> {
     const session = await this.getSession();
-    
-    // Find the specified mailbox (default to inbox)
-    const mailboxes = await this.getMailboxes();
-    const targetMailbox = mailboxes.find(mb => 
-      mb.role === mailboxName.toLowerCase() || 
-      mb.name.toLowerCase().includes(mailboxName.toLowerCase())
-    );
-    
-    if (!targetMailbox) {
-      throw new Error(`Could not find mailbox: ${mailboxName}`);
+
+    // When mailboxName is null or empty, search all mail (no inMailbox filter).
+    // When a mailbox name is provided, resolve it and restrict the query to that mailbox.
+    let filter: any = {};
+    if (mailboxName) {
+      const mailboxes = await this.getMailboxes();
+      const targetMailbox = mailboxes.find(mb =>
+        mb.role === mailboxName.toLowerCase() ||
+        mb.name.toLowerCase().includes(mailboxName.toLowerCase())
+      );
+      if (!targetMailbox) {
+        throw new Error(`Could not find mailbox: ${mailboxName}`);
+      }
+      filter = { inMailbox: targetMailbox.id };
     }
 
     const request: JmapRequest = {
@@ -717,7 +721,7 @@ export class JmapClient {
       methodCalls: [
         ['Email/query', {
           accountId: session.accountId,
-          filter: { inMailbox: targetMailbox.id },
+          filter,
           sort: [{ property: 'receivedAt', isAscending: ascending }],
           limit: Math.min(limit, 50)
         }, 'query'],
