@@ -372,13 +372,15 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'search_emails',
-        description: 'Search emails by subject or content',
+        description:
+          'Full-text search of email body and subject. Does not filter by sender, recipient, or date — use advanced_search for field-specific filtering.',
         inputSchema: {
           type: 'object',
           properties: {
             query: {
               type: 'string',
-              description: 'Search query string',
+              description:
+                'Text to search for in email body and subject lines',
             },
             limit: {
               type: 'number',
