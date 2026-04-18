@@ -1,6 +1,6 @@
 import { FastmailAuth } from './auth.js';
 import { writeFile, mkdir } from 'fs/promises';
-import { dirname, resolve, normalize } from 'path';
+import { dirname, resolve, normalize, sep } from 'path';
 import { homedir } from 'os';
 
 export interface JmapSession {
@@ -1074,7 +1074,7 @@ export class JmapClient {
       throw new Error('Save path contains null bytes');
     }
 
-    if (!resolved.startsWith(allowedDir + '/') && resolved !== allowedDir) {
+    if (!resolved.startsWith(allowedDir + sep) && resolved !== allowedDir) {
       throw new Error(
         `Save path must be within ${allowedDir}. ` +
         `Received: ${savePath}`
