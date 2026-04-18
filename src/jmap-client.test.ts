@@ -187,6 +187,51 @@ describe('createDraft', () => {
     );
   });
 
+  // 8b. Wildcard identity matches concrete from address
+  it('matches wildcard identity for from address', async () => {
+    const wildcardIdentity = { id: 'id-wild', email: '*@example.com', mayDelete: true };
+    mock.method(client, 'getIdentities', async () => [wildcardIdentity]);
+
+    const makeReq = mock.method(client, 'makeRequest', async () => ({
+      methodResponses: [
+        ['Email/set', { created: { draft: { id: 'email-wild' } } }, 'createDraft'],
+      ],
+    }));
+
+    await client.createDraft({ subject: 'Hi', from: 'work@example.com' });
+
+    const emailObj = makeReq.mock.calls[0].arguments[0].methodCalls[0][1].create.draft;
+    assert.deepEqual(emailObj.from, [{ email: 'work@example.com' }]);
+  });
+
+  // 8c. Bare @ rejected (no local part)
+  it('rejects bare @ address against wildcard identity', async () => {
+    const wildcardIdentity = { id: 'id-wild', email: '*@example.com', mayDelete: true };
+    mock.method(client, 'getIdentities', async () => [wildcardIdentity]);
+
+    await assert.rejects(
+      () => client.createDraft({ subject: 'Hi', from: '@example.com' }),
+      (err: Error) => {
+        assert.match(err.message, /not verified/i);
+        return true;
+      },
+    );
+  });
+
+  // 8d. Wildcard identity does not match different domain
+  it('rejects from address that does not match wildcard domain', async () => {
+    const wildcardIdentity = { id: 'id-wild', email: '*@example.com', mayDelete: true };
+    mock.method(client, 'getIdentities', async () => [wildcardIdentity]);
+
+    await assert.rejects(
+      () => client.createDraft({ subject: 'Hi', from: 'work@other.com' }),
+      (err: Error) => {
+        assert.match(err.message, /not verified/i);
+        return true;
+      },
+    );
+  });
+
   // 9. Custom mailboxId used instead of auto-lookup
   it('uses provided mailboxId without looking up mailboxes', async () => {
     const getMailboxes = client.getMailboxes as ReturnType<typeof mock.method>;
@@ -803,5 +848,110 @@ describe('updateDraft replyTo', () => {
 
     const emailObj = makeReq.mock.calls[1].arguments[0].methodCalls[0][1].create.draft;
     assert.deepEqual(emailObj.replyTo, [{ email: 'keep-me@example.com' }]);
+  });
+});
+
+// ---------- wildcard identity ----------
+
+const WILDCARD_IDENTITY = { id: 'id-wild', name: 'Jonathan Godley', email: '*@example.com', mayDelete: true };
+
+describe('sendEmail wildcard identity', () => {
+  let client: JmapClient;
+
+  beforeEach(() => {
+    client = makeClient();
+    mock.method(client, 'getIdentities', async () => [WILDCARD_IDENTITY]);
+    mock.method(client, 'getMailboxes', async () => [
+      DRAFTS_MAILBOX,
+      { id: 'mb-sent', name: 'Sent', role: 'sent' },
+    ]);
+  });
+
+  it('uses concrete from address in email and envelope, not wildcard literal', async () => {
+    const makeReq = mock.method(client, 'makeRequest', async () => ({
+      methodResponses: [
+        ['Email/set', { created: { draft: { id: 'email-new' } } }, 'createEmail'],
+        ['EmailSubmission/set', { created: { submission: { id: 'sub-1' } } }, 'submitEmail'],
+      ],
+    }));
+
+    await client.sendEmail({
+      to: ['bob@example.com'],
+      subject: 'Test',
+      textBody: 'Hello',
+      from: 'work@example.com',
+    });
+
+    const req = makeReq.mock.calls[0].arguments[0];
+    const emailObj = req.methodCalls[0][1].create.draft;
+    assert.deepEqual(emailObj.from, [{ name: 'Jonathan Godley', email: 'work@example.com' }]);
+    const envelope = req.methodCalls[1][1].create.submission.envelope;
+    assert.deepEqual(envelope.mailFrom, { email: 'work@example.com' });
+  });
+});
+
+describe('sendDraft wildcard identity', () => {
+  let client: JmapClient;
+
+  beforeEach(() => {
+    client = makeClient();
+    mock.method(client, 'getIdentities', async () => [WILDCARD_IDENTITY]);
+    mock.method(client, 'getMailboxes', async () => [DRAFTS_MAILBOX, SENT_MAILBOX]);
+  });
+
+  it('matches wildcard identity when draft has concrete from address', async () => {
+    const wildcardDraft = { ...SENDABLE_DRAFT, from: [{ email: 'work@example.com' }] };
+    const makeReq = mock.method(client, 'makeRequest', async (req: any) => {
+      if (req.methodCalls[0][0] === 'Email/get') {
+        return { methodResponses: [['Email/get', { list: [wildcardDraft] }, 'getEmail']] };
+      }
+      return { methodResponses: [['EmailSubmission/set', { created: { submission: { id: 'sub-1' } } }, 'submitDraft']] };
+    });
+
+    const subId = await client.sendDraft('draft-1');
+    assert.equal(subId, 'sub-1');
+
+    const submitCall = makeReq.mock.calls[1].arguments[0];
+    assert.equal(submitCall.methodCalls[0][1].create.submission.identityId, WILDCARD_IDENTITY.id);
+    assert.deepEqual(submitCall.methodCalls[0][1].create.submission.envelope.mailFrom, { email: 'work@example.com' });
+  });
+});
+
+describe('updateDraft wildcard identity', () => {
+  let client: JmapClient;
+
+  beforeEach(() => {
+    client = makeClient();
+    mock.method(client, 'getIdentities', async () => [WILDCARD_IDENTITY]);
+  });
+
+  it('uses concrete from address when updating with wildcard identity', async () => {
+    const existingWild = { ...EXISTING_DRAFT, from: [{ email: 'old@example.com' }] };
+    const makeReq = mock.method(client, 'makeRequest', async (req: any) => {
+      if (req.methodCalls[0][0] === 'Email/get') {
+        return { methodResponses: [['Email/get', { list: [existingWild] }, 'getEmail']] };
+      }
+      return { methodResponses: [['Email/set', { created: { draft: { id: 'draft-2' } }, destroyed: ['draft-1'] }, 'updateDraft']] };
+    });
+
+    await client.updateDraft('draft-1', { from: 'new@example.com' });
+
+    const emailObj = makeReq.mock.calls[1].arguments[0].methodCalls[0][1].create.draft;
+    assert.deepEqual(emailObj.from, [{ email: 'new@example.com' }]);
+  });
+
+  it('preserves concrete from when updating without changing from', async () => {
+    const existingWild = { ...EXISTING_DRAFT, from: [{ email: 'work@example.com' }] };
+    const makeReq = mock.method(client, 'makeRequest', async (req: any) => {
+      if (req.methodCalls[0][0] === 'Email/get') {
+        return { methodResponses: [['Email/get', { list: [existingWild] }, 'getEmail']] };
+      }
+      return { methodResponses: [['Email/set', { created: { draft: { id: 'draft-2' } }, destroyed: ['draft-1'] }, 'updateDraft']] };
+    });
+
+    await client.updateDraft('draft-1', { subject: 'Changed subject only' });
+
+    const emailObj = makeReq.mock.calls[1].arguments[0].methodCalls[0][1].create.draft;
+    assert.deepEqual(emailObj.from, [{ email: 'work@example.com' }]);
   });
 });
