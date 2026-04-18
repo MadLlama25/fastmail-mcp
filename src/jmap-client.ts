@@ -1,6 +1,7 @@
 import { FastmailAuth } from './auth.js';
-import { writeFile, mkdir } from 'fs/promises';
-import { dirname, resolve, normalize, sep } from 'path';
+import { validateFastmailUrl } from './url-validation.js';
+import { writeFile, mkdir, realpath, stat, lstat } from 'fs/promises';
+import { dirname, resolve, normalize, sep, basename, join } from 'path';
 import { homedir } from 'os';
 
 export interface JmapSession {
@@ -83,7 +84,23 @@ export class JmapClient {
     }
 
     const sessionData = await response.json() as any;
-    
+
+    // Validate every URL the server hands us before we send the bearer token to it.
+    // The downloadUrl/uploadUrl are URL templates with {accountId}/{blobId}/etc.
+    // placeholders, so we strip those for parsing and validate origin only.
+    const allowUnsafe = this.auth.getAllowUnsafe();
+    const stripTemplate = (url: string) => url.replace(/\{[^}]+\}/g, 'x');
+    if (typeof sessionData.apiUrl !== 'string') {
+      throw new Error('Invalid session response: apiUrl missing');
+    }
+    validateFastmailUrl(sessionData.apiUrl, 'session.apiUrl', allowUnsafe);
+    if (typeof sessionData.downloadUrl === 'string') {
+      validateFastmailUrl(stripTemplate(sessionData.downloadUrl), 'session.downloadUrl', allowUnsafe);
+    }
+    if (typeof sessionData.uploadUrl === 'string') {
+      validateFastmailUrl(stripTemplate(sessionData.uploadUrl), 'session.uploadUrl', allowUnsafe);
+    }
+
     this.session = {
       apiUrl: sessionData.apiUrl,
       accountId: sessionData.primaryAccounts?.['urn:ietf:params:jmap:mail']
@@ -1081,8 +1098,68 @@ export class JmapClient {
     return resolved;
   }
 
+  /**
+   * Symlink-safe canonicalization of a save path. Walks up to the longest
+   * existing ancestor, realpaths it, and verifies it lives under the canonical
+   * allowed directory. Refuses to overwrite an existing symlink at the target.
+   *
+   * Returns the canonical path that is safe to write to. Throws on escape.
+   */
+  static async safeWritePath(savePath: string, downloadDir?: string): Promise<string> {
+    // Lexical pre-check first (cheap and gives nice errors)
+    const lexical = JmapClient.validateSavePath(savePath, downloadDir);
+    const allowedDir = downloadDir ? resolve(normalize(downloadDir)) : JmapClient.DEFAULT_DOWNLOADS_DIR;
+
+    // Ensure allowed dir exists so realpath can resolve it.
+    await mkdir(allowedDir, { recursive: true });
+    const canonicalAllowed = await realpath(allowedDir);
+
+    // Walk up from the target until we find an existing ancestor.
+    let ancestor = dirname(lexical);
+    const missingSegments: string[] = [];
+    while (true) {
+      try {
+        await stat(ancestor);
+        break;
+      } catch (e: any) {
+        if (e.code !== 'ENOENT') throw e;
+        missingSegments.unshift(basename(ancestor));
+        const parent = dirname(ancestor);
+        if (parent === ancestor) {
+          throw new Error(`Could not find existing ancestor for save path: ${lexical}`);
+        }
+        ancestor = parent;
+      }
+    }
+
+    // Canonicalize the existing ancestor — this is what catches symlink escapes.
+    const canonicalAncestor = await realpath(ancestor);
+    if (canonicalAncestor !== canonicalAllowed && !canonicalAncestor.startsWith(canonicalAllowed + sep)) {
+      throw new Error(
+        `Save path resolves to '${canonicalAncestor}' which is outside the allowed directory '${canonicalAllowed}'. ` +
+        `Refusing to follow symlink escape.`,
+      );
+    }
+
+    // Reconstruct the safe canonical path under the canonical ancestor.
+    const safePath = join(canonicalAncestor, ...missingSegments, basename(lexical));
+
+    // If a symlink already exists at the target, refuse — writing through it
+    // would still escape the allowed directory.
+    try {
+      const lst = await lstat(safePath);
+      if (lst.isSymbolicLink()) {
+        throw new Error(`Refusing to overwrite an existing symlink at the target: ${safePath}`);
+      }
+    } catch (e: any) {
+      if (e.code !== 'ENOENT') throw e;
+    }
+
+    return safePath;
+  }
+
   async downloadAttachmentToFile(emailId: string, attachmentId: string, savePath: string, downloadDir?: string): Promise<{ url: string; bytesWritten: number }> {
-    const validatedPath = JmapClient.validateSavePath(savePath, downloadDir);
+    const safePath = await JmapClient.safeWritePath(savePath, downloadDir);
     const url = await this.downloadAttachment(emailId, attachmentId);
 
     const response = await fetch(url, {
@@ -1095,8 +1172,8 @@ export class JmapClient {
 
     const buffer = Buffer.from(await response.arrayBuffer());
 
-    await mkdir(dirname(validatedPath), { recursive: true });
-    await writeFile(validatedPath, buffer);
+    await mkdir(dirname(safePath), { recursive: true });
+    await writeFile(safePath, buffer);
 
     return { url, bytesWritten: buffer.length };
   }

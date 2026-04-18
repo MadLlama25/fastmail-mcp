@@ -11,12 +11,12 @@ import { FastmailAuth, FastmailConfig } from './auth.js';
 import { JmapClient } from './jmap-client.js';
 import { ContactsCalendarClient } from './contacts-calendar.js';
 import { CalDAVCalendarClient } from './caldav-client.js';
-import { coerceStringArray, coerceBool } from './coerce.js';
+import { coerceStringArray, coerceBool, redactBearerTokens } from './coerce.js';
 
 const server = new Server(
   {
     name: 'fastmail-mcp',
-    version: '1.9.2',
+    version: '1.9.3',
   },
   {
     capabilities: {
@@ -70,7 +70,15 @@ function getAuthConfig(): FastmailConfig {
     'fastmail_base_url',
   ]);
 
-  return { apiToken, baseUrl: baseInfo.value };
+  // Opt-in for self-hosted JMAP servers. Required to use any base URL outside
+  // the api.fastmail.com / www.fastmailusercontent.com allowlist.
+  const unsafeInfo = findEnvValue([
+    'FASTMAIL_ALLOW_UNSAFE_BASE_URL',
+    'USER_CONFIG_FASTMAIL_ALLOW_UNSAFE_BASE_URL',
+  ]);
+  const allowUnsafeBaseUrl = unsafeInfo.value === 'true' || unsafeInfo.value === '1';
+
+  return { apiToken, baseUrl: baseInfo.value, allowUnsafeBaseUrl };
 }
 
 function initializeClient(): JmapClient {
@@ -1594,7 +1602,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           };
         } catch (error) {
           // Provide helpful error information
-          throw new McpError(ErrorCode.InternalError, `Thread access failed: ${error instanceof Error ? error.message : String(error)}`);
+          throw new McpError(ErrorCode.InternalError, `Thread access failed: ${redactBearerTokens(error instanceof Error ? error.message : String(error))}`);
         }
       }
 
@@ -1901,9 +1909,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (error instanceof McpError) {
       throw error;
     }
+    const raw = error instanceof Error ? error.message : String(error);
     throw new McpError(
       ErrorCode.InternalError,
-      `Tool execution failed: ${error instanceof Error ? error.message : String(error)}`
+      `Tool execution failed: ${redactBearerTokens(raw)}`
     );
   }
 });

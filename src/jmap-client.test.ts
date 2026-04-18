@@ -1,7 +1,7 @@
 import { describe, it, beforeEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { homedir } from 'os';
-import { resolve, join } from 'path';
+import { resolve, join, basename } from 'path';
 import { JmapClient } from './jmap-client.js';
 import { FastmailAuth } from './auth.js';
 
@@ -665,6 +665,91 @@ describe('validateSavePath', () => {
         return true;
       },
     );
+  });
+});
+
+// ---------- safeWritePath (symlink-safe canonicalization) ----------
+
+import { mkdtemp, symlink, rm, mkdir as fsMkdir, writeFile as fsWriteFile } from 'fs/promises';
+import { tmpdir } from 'os';
+
+describe('safeWritePath (symlink escapes)', () => {
+  it('accepts a normal path inside the allowed directory', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'fastmail-mcp-safe-'));
+    try {
+      const allowed = join(root, 'allowed');
+      await fsMkdir(allowed, { recursive: true });
+      const target = join(allowed, 'attachment.bin');
+      const safe = await JmapClient.safeWritePath(target, allowed);
+      // realpath on macOS may add /private prefix, so just check basename equality
+      assert.equal(basename(safe), 'attachment.bin');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('creates intermediate directories under the canonical allowed dir', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'fastmail-mcp-safe-'));
+    try {
+      const allowed = join(root, 'allowed');
+      await fsMkdir(allowed, { recursive: true });
+      const target = join(allowed, 'sub1', 'sub2', 'file.bin');
+      const safe = await JmapClient.safeWritePath(target, allowed);
+      assert.ok(safe.endsWith(join('sub1', 'sub2', 'file.bin')));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects writes via a symlink that escapes the allowed directory', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'fastmail-mcp-safe-'));
+    try {
+      const allowed = join(root, 'allowed');
+      const outside = join(root, 'outside');
+      await fsMkdir(allowed, { recursive: true });
+      await fsMkdir(outside, { recursive: true });
+      // Symlink inside allowed pointing to outside
+      await symlink(outside, join(allowed, 'escape'));
+      const target = join(allowed, 'escape', 'pwned.bin');
+      await assert.rejects(
+        () => JmapClient.safeWritePath(target, allowed),
+        /outside the allowed directory|symlink escape/i,
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses to overwrite a pre-existing symlink at the target path', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'fastmail-mcp-safe-'));
+    try {
+      const allowed = join(root, 'allowed');
+      const outside = join(root, 'outside.txt');
+      await fsMkdir(allowed, { recursive: true });
+      await fsWriteFile(outside, 'orig');
+      const target = join(allowed, 'sneaky.bin');
+      await symlink(outside, target);
+      await assert.rejects(
+        () => JmapClient.safeWritePath(target, allowed),
+        /existing symlink/i,
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('still rejects lexical traversal even when allowed dir exists', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'fastmail-mcp-safe-'));
+    try {
+      const allowed = join(root, 'allowed');
+      await fsMkdir(allowed, { recursive: true });
+      await assert.rejects(
+        () => JmapClient.safeWritePath(`${allowed}/../escape.bin`, allowed),
+        /must be within/,
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });
 

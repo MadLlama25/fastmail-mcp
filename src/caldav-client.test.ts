@@ -6,6 +6,7 @@ import {
   formatICalDate,
   parseCalendarObject,
   escapeICalText,
+  validateAndFormatICalDate,
   CalDAVCalendarClient,
 } from './caldav-client.js';
 
@@ -334,5 +335,80 @@ describe('CalDAVCalendarClient.getCalendarEvents', () => {
 
     const callArgs = mockDAVClient.fetchCalendarObjects.mock.calls[0].arguments[0];
     assert.equal(callArgs.timeRange, undefined);
+  });
+});
+
+describe('validateAndFormatICalDate', () => {
+  it('accepts and formats date-only', () => {
+    assert.equal(validateAndFormatICalDate('2026-04-18', 'start'), '20260418');
+  });
+
+  it('accepts and formats UTC datetime', () => {
+    assert.equal(validateAndFormatICalDate('2026-04-18T10:00:00Z', 'start'), '20260418T100000Z');
+  });
+
+  it('accepts and normalizes positive offset to UTC', () => {
+    // 2026-04-18T10:00:00+02:00 = 2026-04-18T08:00:00Z
+    assert.equal(validateAndFormatICalDate('2026-04-18T10:00:00+02:00', 'start'), '20260418T080000Z');
+  });
+
+  it('accepts and normalizes negative offset to UTC', () => {
+    // 2026-04-18T10:00:00-05:00 = 2026-04-18T15:00:00Z
+    assert.equal(validateAndFormatICalDate('2026-04-18T10:00:00-05:00', 'start'), '20260418T150000Z');
+  });
+
+  it('accepts floating datetime (no zone)', () => {
+    assert.equal(validateAndFormatICalDate('2026-04-18T10:00:00', 'start'), '20260418T100000');
+  });
+
+  it('rejects CRLF injection attempt', () => {
+    assert.throws(
+      () => validateAndFormatICalDate('2026-04-18T10:00:00Z\r\nATTENDEE:mailto:attacker@example.com', 'start'),
+      /control characters/,
+    );
+  });
+
+  it('rejects bare LF injection attempt', () => {
+    assert.throws(
+      () => validateAndFormatICalDate('2026-04-18T10:00:00Z\nATTENDEE:mailto:attacker@example.com', 'start'),
+      /control characters/,
+    );
+  });
+
+  it('rejects null byte', () => {
+    assert.throws(
+      () => validateAndFormatICalDate('2026-04-18T10:00:00Z\0', 'start'),
+      /control characters/,
+    );
+  });
+
+  it('rejects malformed date', () => {
+    assert.throws(
+      () => validateAndFormatICalDate('not-a-date', 'start'),
+      /must be ISO-8601/,
+    );
+  });
+
+  it('rejects extra trailing content', () => {
+    assert.throws(
+      () => validateAndFormatICalDate('2026-04-18T10:00:00Z bonus', 'start'),
+      /must be ISO-8601/,
+    );
+  });
+
+  it('rejects non-string input', () => {
+    assert.throws(
+      () => validateAndFormatICalDate(undefined as any, 'start'),
+      /must be a string/,
+    );
+  });
+
+  it('throws with field name in error', () => {
+    try {
+      validateAndFormatICalDate('garbage', 'event.end');
+      assert.fail('should have thrown');
+    } catch (e) {
+      assert.match((e as Error).message, /event\.end/);
+    }
   });
 });

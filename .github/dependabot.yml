@@ -1,0 +1,24 @@
+version: 2
+updates:
+  # Refresh SHA-pinned GitHub Actions monthly. Without this, the SHA pins go
+  # stale and we miss security updates upstream.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns:
+          - "*"
+
+  # Surface npm advisories on the production deps (currently @modelcontextprotocol/sdk and tsdav).
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      production:
+        dependency-type: production
+      development:
+        dependency-type: development

@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { coerceStringArray, coerceBool } from './coerce.js';
+import { coerceStringArray, coerceBool, redactBearerTokens } from './coerce.js';
 
 describe('coerceStringArray', () => {
   it('returns undefined for undefined input', () => {
@@ -82,5 +82,39 @@ describe('coerceBool', () => {
   it('returns undefined for numbers', () => {
     assert.equal(coerceBool(1), undefined);
     assert.equal(coerceBool(0), undefined);
+  });
+});
+
+describe('redactBearerTokens', () => {
+  it('redacts Bearer header pattern', () => {
+    const out = redactBearerTokens('Authorization: Bearer abc.def.ghi failed');
+    assert.equal(out, 'Authorization: Bearer [REDACTED] failed');
+  });
+
+  it('redacts case-insensitive Bearer', () => {
+    assert.equal(redactBearerTokens('bearer secret'), 'Bearer [REDACTED]');
+    assert.equal(redactBearerTokens('BEARER xyz'), 'Bearer [REDACTED]');
+  });
+
+  it('redacts Fastmail token shape (fmu...)', () => {
+    const out = redactBearerTokens(
+      'Failed: token fmu1-3b1e4048-036f4f86690cd04d8d05105a369ee30b-0-dbfc727af72d5e3e27dd324675869337 invalid'
+    );
+    assert.match(out, /fmu\[REDACTED\]/);
+    assert.ok(!out.includes('fmu1-3b1e'));
+  });
+
+  it('does not redact unrelated text', () => {
+    const original = 'JMAP error: invalidArguments — mailbox not found';
+    assert.equal(redactBearerTokens(original), original);
+  });
+
+  it('redacts multiple tokens in one string', () => {
+    const out = redactBearerTokens('Bearer one and Bearer two');
+    assert.equal(out, 'Bearer [REDACTED] and Bearer [REDACTED]');
+  });
+
+  it('handles empty string', () => {
+    assert.equal(redactBearerTokens(''), '');
   });
 });

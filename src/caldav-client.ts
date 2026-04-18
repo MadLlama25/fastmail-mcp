@@ -136,6 +136,51 @@ export function escapeICalText(value: string): string {
     .replace(/\r?\n/g, '\\n');
 }
 
+/**
+ * Validate and serialize a date/datetime value for use in DTSTART/DTEND.
+ * Accepts only:
+ *   - YYYY-MM-DD                       (date-only)
+ *   - YYYY-MM-DDTHH:MM:SS              (floating local)
+ *   - YYYY-MM-DDTHH:MM:SSZ             (UTC)
+ *   - YYYY-MM-DDTHH:MM:SS+HH:MM        (with offset, normalized to UTC)
+ * Rejects any control characters or unexpected content. Returns the ICS-safe
+ * serialized form (no `-` or `:`, with `Z` suffix for instants, or `YYYYMMDD`
+ * for date-only). Throws on invalid input.
+ */
+export function validateAndFormatICalDate(value: string, fieldName: string): string {
+  if (typeof value !== 'string') {
+    throw new Error(`${fieldName} must be a string`);
+  }
+  if (/[\x00-\x1F\x7F]/.test(value)) {
+    throw new Error(`${fieldName} contains control characters`);
+  }
+  const trimmed = value.trim();
+  // Date-only: 2026-04-18
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    const d = new Date(trimmed + 'T00:00:00Z');
+    if (Number.isNaN(d.getTime())) throw new Error(`${fieldName} is not a valid date`);
+    return trimmed.replace(/-/g, '');
+  }
+  // Datetime forms: floating, UTC (Z), or with offset (+/-HH:MM, +/-HHMM, +/-HH)
+  const dtMatch = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})(Z|[+-]\d{2}:?\d{0,2})?$/.exec(trimmed);
+  if (!dtMatch) {
+    throw new Error(`${fieldName} must be ISO-8601 date or datetime (got: ${trimmed.slice(0, 60)})`);
+  }
+  const [, datePart, timePart, tz] = dtMatch;
+  const isoForParse = `${datePart}T${timePart}${tz || ''}`;
+  const d = new Date(isoForParse);
+  if (Number.isNaN(d.getTime())) {
+    throw new Error(`${fieldName} is not a valid datetime`);
+  }
+  if (!tz) {
+    // Floating: emit as-is without zone designator
+    return `${datePart.replace(/-/g, '')}T${timePart.replace(/:/g, '')}`;
+  }
+  // UTC or offset: normalize to UTC instant
+  const utc = d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+  return utc;
+}
+
 export class CalDAVCalendarClient {
   private config: CalDAVConfig;
   private client: DAVClient | null = null;
@@ -261,6 +306,8 @@ export class CalDAVCalendarClient {
 
     const uid = `${Date.now()}-${Math.random().toString(36).slice(2)}@fastmail-mcp`;
     const now = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+    const dtstart = validateAndFormatICalDate(event.start, 'event.start');
+    const dtend = validateAndFormatICalDate(event.end, 'event.end');
     const ical = [
       'BEGIN:VCALENDAR',
       'VERSION:2.0',
@@ -268,8 +315,8 @@ export class CalDAVCalendarClient {
       'BEGIN:VEVENT',
       `UID:${uid}`,
       `DTSTAMP:${now}`,
-      `DTSTART:${event.start.replace(/[-:]/g, '')}`,
-      `DTEND:${event.end.replace(/[-:]/g, '')}`,
+      `DTSTART:${dtstart}`,
+      `DTEND:${dtend}`,
       `SUMMARY:${escapeICalText(event.title)}`,
       event.description ? `DESCRIPTION:${escapeICalText(event.description)}` : '',
       event.location ? `LOCATION:${escapeICalText(event.location)}` : '',

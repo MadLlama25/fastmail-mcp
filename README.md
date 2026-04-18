@@ -72,6 +72,8 @@ A Model Context Protocol (MCP) server that provides access to the Fastmail API, 
    ```bash
    export FASTMAIL_API_TOKEN="your_api_token_here"
    # Optional: customize base URL (defaults to https://api.fastmail.com)
+   # Only api.fastmail.com and www.fastmailusercontent.com are accepted by default.
+   # For self-hosted JMAP servers, also set FASTMAIL_ALLOW_UNSAFE_BASE_URL=true.
    export FASTMAIL_BASE_URL="https://api.fastmail.com"
    # Optional: customize attachment download directory (defaults to ~/Downloads/fastmail-mcp/)
    export FASTMAIL_DOWNLOAD_DIR="/path/to/your/downloads"
@@ -110,7 +112,7 @@ Pin to a tagged release:
 
 ```bash
 FASTMAIL_API_TOKEN="your_token" \
-  npx --yes github:MadLlama25/fastmail-mcp@v1.9.2 fastmail-mcp
+  npx --yes github:MadLlama25/fastmail-mcp@v1.9.3 fastmail-mcp
 ```
 
 ## Install as a Claude Desktop Extension (DXT)

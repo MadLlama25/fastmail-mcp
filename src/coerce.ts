@@ -2,6 +2,19 @@
 // structured params before dispatch. These helpers coerce such values back to
 // their expected shapes so the handlers work against both strict and lenient clients.
 
+// Defense-in-depth: scrub bearer-token-shaped substrings from any string that
+// might be reflected back to the MCP caller (e.g. a JMAP error message). This
+// is intentionally narrow — provider error messages are useful for the LLM to
+// recover from, so we don't want to over-sanitize.
+const BEARER_PATTERN = /Bearer\s+\S+/gi;
+const FASTMAIL_TOKEN_PATTERN = /fmu\d+-[A-Za-z0-9-]{20,}/g;
+
+export function redactBearerTokens(input: string): string {
+  return input
+    .replace(BEARER_PATTERN, 'Bearer [REDACTED]')
+    .replace(FASTMAIL_TOKEN_PATTERN, 'fmu[REDACTED]');
+}
+
 export function coerceStringArray(value: unknown): string[] | undefined {
   if (value === undefined || value === null) return undefined;
   if (Array.isArray(value)) return value.map(String);
