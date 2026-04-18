@@ -11,6 +11,7 @@ import { FastmailAuth, FastmailConfig } from './auth.js';
 import { JmapClient } from './jmap-client.js';
 import { ContactsCalendarClient } from './contacts-calendar.js';
 import { CalDAVCalendarClient } from './caldav-client.js';
+import { coerceStringArray, coerceBool } from './coerce.js';
 
 const server = new Server(
   {
@@ -141,7 +142,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               description: 'ID of the mailbox to list emails from (optional, defaults to all)',
             },
             limit: {
-              type: 'number',
+              type: ['number', 'string'],
               description: 'Maximum number of emails to return (default: 20)',
               default: 20,
             },
@@ -173,9 +174,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           type: 'object',
           properties: {
             to: {
-              type: 'array',
-              items: { type: 'string' },
-              description: 'Recipient email addresses',
+              oneOf: [
+                { type: 'array', items: { type: 'string' } },
+                { type: 'string' },
+              ],
+              description: 'Recipient email addresses (array of strings, or a comma-separated string)',
             },
             cc: {
               type: 'array',
@@ -264,7 +267,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               description: 'HTML body (optional)',
             },
             send: {
-              type: 'boolean',
+              type: ['boolean', 'string'],
               description: 'Whether to send the reply immediately (default: true). Set to false to save as draft instead.',
             },
             replyTo: {
@@ -410,7 +413,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               description: 'Search query string',
             },
             limit: {
-              type: 'number',
+              type: ['number', 'string'],
               description: 'Maximum number of results (default: 20)',
               default: 20,
             },
@@ -577,7 +580,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           type: 'object',
           properties: {
             limit: {
-              type: 'number',
+              type: ['number', 'string'],
               description: 'Number of recent emails to retrieve (default: 10, max: 50)',
               default: 10,
             },
@@ -784,7 +787,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               description: 'Emails before this date (ISO 8601)',
             },
             limit: {
-              type: 'number',
+              type: ['number', 'string'],
               description: 'Maximum results (default: 50)',
               default: 50,
             },
@@ -1027,7 +1030,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case 'send_email': {
         const { to, cc, bcc, from, mailboxId, subject, textBody, htmlBody, inReplyTo, references, replyTo } = args as any;
-        if (!to || !Array.isArray(to) || to.length === 0) {
+        const toArray = coerceStringArray(to);
+        if (!toArray || toArray.length === 0) {
           throw new McpError(ErrorCode.InvalidParams, 'to field is required and must be a non-empty array');
         }
         if (!subject) {
@@ -1038,7 +1042,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
 
         const submissionId = await client.sendEmail({
-          to,
+          to: toArray,
           cc,
           bcc,
           from,
@@ -1062,7 +1066,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'reply_email': {
-        const { originalEmailId, to, cc, bcc, from, textBody, htmlBody, send: shouldSend = true, replyTo } = args as any;
+        const { originalEmailId, to, cc, bcc, from, textBody, htmlBody, send, replyTo } = args as any;
+        const shouldSend = coerceBool(send) ?? true;
         if (!originalEmailId) {
           throw new McpError(ErrorCode.InvalidParams, 'originalEmailId is required');
         }
@@ -1092,8 +1097,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
 
         // Default recipients to the original sender
-        const replyRecipients = (to && Array.isArray(to) && to.length > 0)
-          ? to
+        const toArray = coerceStringArray(to);
+        const replyRecipients = (toArray && toArray.length > 0)
+          ? toArray
           : (Array.isArray(originalEmail.from) ? originalEmail.from.map((addr: any) => addr.email).filter(Boolean) : []);
 
         if (replyRecipients.length === 0) {
