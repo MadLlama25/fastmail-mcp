@@ -8,3 +8,5 @@ dist/
 CLAUDE.md
 *.dxt
 test-live*.sh
+test-live*.mjs
+test-live*.js
