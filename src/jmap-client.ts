@@ -97,16 +97,6 @@ export class JmapClient {
     return this.session;
   }
 
-  async getUserEmail(): Promise<string> {
-    try {
-      const identity = await this.getDefaultIdentity();
-      return identity?.email || 'user@example.com';
-    } catch (error) {
-      // Fallback if Identity/get is not available
-      return 'user@example.com';
-    }
-  }
-
   async makeRequest(request: JmapRequest): Promise<JmapResponse> {
     const session = await this.getSession();
     
@@ -459,13 +449,13 @@ export class JmapClient {
 
     const result = this.getMethodResult(response, 0);
 
-    // Bug 2: Propagate server-provided error details from notCreated
+    // Propagate server-provided error details from notCreated
     if (result.notCreated?.draft) {
       const err = result.notCreated.draft;
       throw new Error(`Failed to create draft: ${err.type}${err.description ? ' - ' + err.description : ''}`);
     }
 
-    // Bug 3: Throw if created ID is missing instead of returning 'unknown'
+    // Throw if created ID is missing instead of returning silently
     const emailId = result.created?.draft?.id;
     if (!emailId) {
       throw new Error('Draft creation returned no email ID');

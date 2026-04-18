@@ -853,7 +853,7 @@ describe('updateDraft replyTo', () => {
 
 // ---------- wildcard identity ----------
 
-const WILDCARD_IDENTITY = { id: 'id-wild', name: 'Jonathan Godley', email: '*@example.com', mayDelete: true };
+const WILDCARD_IDENTITY = { id: 'id-wild', name: 'Una Wilde', email: '*@example.com', mayDelete: true };
 
 describe('sendEmail wildcard identity', () => {
   let client: JmapClient;
@@ -884,7 +884,7 @@ describe('sendEmail wildcard identity', () => {
 
     const req = makeReq.mock.calls[0].arguments[0];
     const emailObj = req.methodCalls[0][1].create.draft;
-    assert.deepEqual(emailObj.from, [{ name: 'Jonathan Godley', email: 'work@example.com' }]);
+    assert.deepEqual(emailObj.from, [{ name: 'Una Wilde', email: 'work@example.com' }]);
     const envelope = req.methodCalls[1][1].create.submission.envelope;
     assert.deepEqual(envelope.mailFrom, { email: 'work@example.com' });
   });
@@ -953,5 +953,25 @@ describe('updateDraft wildcard identity', () => {
 
     const emailObj = makeReq.mock.calls[1].arguments[0].methodCalls[0][1].create.draft;
     assert.deepEqual(emailObj.from, [{ email: 'work@example.com' }]);
+  });
+});
+
+// ---------- version sync ----------
+
+describe('version sync', () => {
+  it('package.json, manifest.json, and index.ts all have the same version', async () => {
+    const { readFileSync } = await import('fs');
+    const { resolve: r } = await import('path');
+    const root = r(import.meta.dirname, '..');
+
+    const pkg = JSON.parse(readFileSync(r(root, 'package.json'), 'utf8'));
+    const manifest = JSON.parse(readFileSync(r(root, 'manifest.json'), 'utf8'));
+    const indexSrc = readFileSync(r(root, 'src', 'index.ts'), 'utf8');
+
+    const indexMatch = indexSrc.match(/version:\s*'([^']+)'/);
+    assert.ok(indexMatch, 'Could not find version string in index.ts');
+
+    assert.equal(pkg.version, manifest.version, 'package.json and manifest.json versions must match');
+    assert.equal(pkg.version, indexMatch[1], 'package.json and index.ts versions must match');
   });
 });
