@@ -41,7 +41,7 @@ A Model Context Protocol (MCP) server that provides access to the Fastmail API, 
 ## Setup
 
 ### Prerequisites
-- Node.js 18+ 
+- Node.js 20+ 
 - A Fastmail account with API access
 - Fastmail API token
 
