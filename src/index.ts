@@ -10,7 +10,7 @@ import {
 import { FastmailAuth, FastmailConfig } from './auth.js';
 import { JmapClient } from './jmap-client.js';
 import { ContactsCalendarClient } from './contacts-calendar.js';
-import { CalDAVCalendarClient } from './caldav-client.js';
+import { CalDAVCalendarClient, RecurrenceInput } from './caldav-client.js';
 import { coerceStringArray, coerceBool, redactBearerTokens } from './coerce.js';
 
 const server = new Server(
@@ -569,8 +569,140 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               },
               description: 'Event participants (optional)',
             },
+            recurrence: {
+              description: 'Recurrence rule (optional). Either a raw RFC 5545 RRULE string (e.g. "FREQ=YEARLY;BYMONTH=4;BYMONTHDAY=29") or a structured object. Structured form wins when both are present.',
+              oneOf: [
+                { type: 'string' },
+                {
+                  type: 'object',
+                  properties: {
+                    frequency: { type: 'string', enum: ['DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY'] },
+                    interval: { type: 'number' },
+                    count: { type: 'number' },
+                    until: { type: 'string', description: 'ISO 8601 date/datetime' },
+                    byDay: { type: 'string', description: 'e.g. MO,WE,FR or -1SU' },
+                    byMonth: { type: 'number' },
+                    byMonthDay: { type: 'number' },
+                  },
+                  required: ['frequency'],
+                },
+              ],
+            },
           },
           required: ['calendarId', 'title', 'start', 'end'],
+        },
+      },
+      {
+        name: 'update_calendar_event',
+        description: 'Update an existing calendar event. All fields except eventId are optional — only provide the ones you want to change. Recurrence can be added or changed in the same call.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            eventId: {
+              type: 'string',
+              description: 'ID of the event to update (UID from get_calendar_event)',
+            },
+            title: { type: 'string', description: 'New event title' },
+            description: { type: 'string', description: 'New event description' },
+            start: { type: 'string', description: 'New start time in ISO 8601 format' },
+            end: { type: 'string', description: 'New end time in ISO 8601 format' },
+            location: { type: 'string', description: 'New event location' },
+            participants: {
+              type: 'array',
+              items: { type: 'object', properties: { email: { type: 'string' }, name: { type: 'string' } } },
+              description: 'New participants list (replaces existing)',
+            },
+            recurrence: {
+              description: 'Recurrence rule. Raw RRULE string (e.g. "FREQ=YEARLY;BYMONTH=4;BYMONTHDAY=29") or structured object.',
+              oneOf: [
+                { type: 'string' },
+                {
+                  type: 'object',
+                  properties: {
+                    frequency: { type: 'string', enum: ['DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY'] },
+                    interval: { type: 'number' },
+                    count: { type: 'number' },
+                    until: { type: 'string' },
+                    byDay: { type: 'string' },
+                    byMonth: { type: 'number' },
+                    byMonthDay: { type: 'number' },
+                  },
+                  required: ['frequency'],
+                },
+              ],
+            },
+          },
+          required: ['eventId'],
+        },
+      },
+      {
+        name: 'delete_calendar_event',
+        description: 'Delete a calendar event by ID',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            eventId: {
+              type: 'string',
+              description: 'ID of the event to delete (UID from get_calendar_event)',
+            },
+          },
+          required: ['eventId'],
+        },
+      },
+      {
+        name: 'create_contact',
+        description: 'Create a new contact in the address book',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            name: { type: 'string', description: 'Full name of the contact' },
+            emails: {
+              type: 'array',
+              items: { type: 'object', properties: { value: { type: 'string' }, type: { type: 'string' } }, required: ['value'] },
+              description: 'Email addresses (optional)',
+            },
+            phones: {
+              type: 'array',
+              items: { type: 'object', properties: { value: { type: 'string' }, type: { type: 'string' } }, required: ['value'] },
+              description: 'Phone numbers (optional)',
+            },
+            notes: { type: 'string', description: 'Notes (optional)' },
+          },
+          required: ['name'],
+        },
+      },
+      {
+        name: 'update_contact',
+        description: 'Update an existing contact. Only provide the fields you want to change.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            contactId: { type: 'string', description: 'ID of the contact to update' },
+            name: { type: 'string', description: 'New full name' },
+            emails: {
+              type: 'array',
+              items: { type: 'object', properties: { value: { type: 'string' }, type: { type: 'string' } }, required: ['value'] },
+              description: 'New email addresses (replaces existing)',
+            },
+            phones: {
+              type: 'array',
+              items: { type: 'object', properties: { value: { type: 'string' }, type: { type: 'string' } }, required: ['value'] },
+              description: 'New phone numbers (replaces existing)',
+            },
+            notes: { type: 'string', description: 'New notes' },
+          },
+          required: ['contactId'],
+        },
+      },
+      {
+        name: 'delete_contact',
+        description: 'Delete a contact from the address book',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            contactId: { type: 'string', description: 'ID of the contact to delete' },
+          },
+          required: ['contactId'],
         },
       },
       {
@@ -1351,7 +1483,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'create_calendar_event': {
-        const { calendarId, title, description, start, end, location, participants } = args as any;
+        const { calendarId, title, description, start, end, location, participants, recurrence } = args as any;
         if (!calendarId || !title || !start || !end) {
           throw new McpError(ErrorCode.InvalidParams, 'calendarId, title, start, and end are required');
         }
@@ -1368,9 +1500,81 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           }
           const eventId = await davClient.createCalendarEvent({
             calendarId, title, description, start, end, location,
+            recurrence: recurrence as string | RecurrenceInput | undefined,
           });
           return { content: [{ type: 'text', text: `Calendar event created via CalDAV. Event ID: ${eventId}` }] };
         }
+      }
+
+      case 'update_calendar_event': {
+        const { eventId, title, description, start, end, location, participants, recurrence } = args as any;
+        if (!eventId) {
+          throw new McpError(ErrorCode.InvalidParams, 'eventId is required');
+        }
+        try {
+          const contactsClient = initializeContactsCalendarClient();
+          await contactsClient.updateCalendarEvent(eventId, { title, description, start, end, location, participants });
+          return { content: [{ type: 'text', text: `Calendar event ${eventId} updated successfully.` }] };
+        } catch {
+          const davClient = initializeCalDAVClient();
+          if (!davClient) {
+            throw new McpError(ErrorCode.InvalidRequest, 'JMAP calendars not available and CalDAV not configured. Set FASTMAIL_CALDAV_USERNAME and FASTMAIL_CALDAV_PASSWORD to use CalDAV.');
+          }
+          await davClient.updateCalendarEvent(eventId, {
+            title, description, start, end, location,
+            recurrence: recurrence as string | RecurrenceInput | undefined,
+          });
+          return { content: [{ type: 'text', text: `Calendar event ${eventId} updated via CalDAV.` }] };
+        }
+      }
+
+      case 'delete_calendar_event': {
+        const { eventId } = args as any;
+        if (!eventId) {
+          throw new McpError(ErrorCode.InvalidParams, 'eventId is required');
+        }
+        try {
+          const contactsClient = initializeContactsCalendarClient();
+          await contactsClient.deleteCalendarEvent(eventId);
+          return { content: [{ type: 'text', text: `Calendar event ${eventId} deleted successfully.` }] };
+        } catch {
+          const davClient = initializeCalDAVClient();
+          if (!davClient) {
+            throw new McpError(ErrorCode.InvalidRequest, 'JMAP calendars not available and CalDAV not configured. Set FASTMAIL_CALDAV_USERNAME and FASTMAIL_CALDAV_PASSWORD to use CalDAV.');
+          }
+          await davClient.deleteCalendarEvent(eventId);
+          return { content: [{ type: 'text', text: `Calendar event ${eventId} deleted via CalDAV.` }] };
+        }
+      }
+
+      case 'create_contact': {
+        const { name, emails, phones, notes } = args as any;
+        if (!name) {
+          throw new McpError(ErrorCode.InvalidParams, 'name is required');
+        }
+        const contactsClient = initializeContactsCalendarClient();
+        const contactId = await contactsClient.createContact({ name, emails, phones, notes });
+        return { content: [{ type: 'text', text: `Contact created successfully. Contact ID: ${contactId}` }] };
+      }
+
+      case 'update_contact': {
+        const { contactId, name, emails, phones, notes } = args as any;
+        if (!contactId) {
+          throw new McpError(ErrorCode.InvalidParams, 'contactId is required');
+        }
+        const contactsClient = initializeContactsCalendarClient();
+        await contactsClient.updateContact(contactId, { name, emails, phones, notes });
+        return { content: [{ type: 'text', text: `Contact ${contactId} updated successfully.` }] };
+      }
+
+      case 'delete_contact': {
+        const { contactId } = args as any;
+        if (!contactId) {
+          throw new McpError(ErrorCode.InvalidParams, 'contactId is required');
+        }
+        const contactsClient = initializeContactsCalendarClient();
+        await contactsClient.deleteContact(contactId);
+        return { content: [{ type: 'text', text: `Contact ${contactId} deleted successfully.` }] };
       }
 
       case 'list_identities': {
@@ -1765,7 +1969,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           },
           contacts: {
             available: !!session.capabilities['urn:ietf:params:jmap:contacts'],
-            functions: ['list_contacts', 'get_contact', 'search_contacts'],
+            functions: ['list_contacts', 'get_contact', 'search_contacts', 'create_contact', 'update_contact', 'delete_contact'],
             note: session.capabilities['urn:ietf:params:jmap:contacts'] ? 
               'Contacts are available' : 
               'Contacts access not available - may require enabling in Fastmail account settings',
@@ -1781,7 +1985,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           },
           calendar: {
             available: !!session.capabilities['urn:ietf:params:jmap:calendars'],
-            functions: ['list_calendars', 'list_calendar_events', 'get_calendar_event', 'create_calendar_event'],
+            functions: ['list_calendars', 'list_calendar_events', 'get_calendar_event', 'create_calendar_event', 'update_calendar_event', 'delete_calendar_event'],
             note: session.capabilities['urn:ietf:params:jmap:calendars'] ? 
               'Calendar is available' : 
               'Calendar access not available - may require enabling in Fastmail account settings',

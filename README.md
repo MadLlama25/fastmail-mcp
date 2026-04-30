@@ -24,11 +24,15 @@ A Model Context Protocol (MCP) server that provides access to the Fastmail API, 
 - List all contacts with full contact information
 - Get specific contacts by ID
 - Search contacts by name or email
+- Create, update, and delete contacts
 
 ### Calendar Operations
 - List all calendars and calendar events
 - Get specific calendar events by ID
 - Create new calendar events with participants and details
+- Update existing calendar events (title, time, location, recurrence)
+- Delete calendar events
+- Recurring events via RFC 5545 RRULE (raw string or structured object)
 
 ### Label vs Move Operations
 - **move_email/bulk_move**: Replaces ALL mailboxes for an email (folder behavior)
@@ -134,7 +138,7 @@ You can install this server as a Desktop Extension for Claude Desktop using the 
 
 3. Use any of the tools (e.g. `get_recent_emails`).
 
-## Available Tools (38 Total)
+## Available Tools (43 Total)
 
 **🎯 Most Popular Tools:**
 - **check_function_availability**: Check what's available and get setup guidance  
@@ -211,6 +215,12 @@ You can install this server as a Desktop Extension for Claude Desktop using the 
   - Parameters: `contactId` (required)
 - **search_contacts**: Search contacts by name or email
   - Parameters: `query` (required), `limit` (default: 20)
+- **create_contact**: Create a new contact
+  - Parameters: `name` (required), `emails` (optional array), `phones` (optional array), `notes` (optional)
+- **update_contact**: Update an existing contact (only provide fields to change)
+  - Parameters: `contactId` (required), `name` (optional), `emails` (optional array), `phones` (optional array), `notes` (optional)
+- **delete_contact**: Delete a contact from the address book
+  - Parameters: `contactId` (required)
 
 ### Calendar Tools
 
@@ -219,8 +229,12 @@ You can install this server as a Desktop Extension for Claude Desktop using the 
   - Parameters: `calendarId` (optional), `limit` (default: 50)
 - **get_calendar_event**: Get a specific calendar event by ID
   - Parameters: `eventId` (required)
-- **create_calendar_event**: Create a new calendar event
-  - Parameters: `calendarId` (required), `title` (required), `description` (optional), `start` (required, ISO 8601), `end` (required, ISO 8601), `location` (optional), `participants` (optional array)
+- **create_calendar_event**: Create a new calendar event (supports recurrence)
+  - Parameters: `calendarId` (required), `title` (required), `description` (optional), `start` (required, ISO 8601), `end` (required, ISO 8601), `location` (optional), `participants` (optional array), `recurrence` (optional — raw RRULE string like `"FREQ=YEARLY;BYMONTH=4;BYMONTHDAY=29"` or structured object `{frequency, interval?, count?, until?, byDay?, byMonth?, byMonthDay?}`)
+- **update_calendar_event**: Update an existing calendar event (only provide fields to change; preserves unspecified fields)
+  - Parameters: `eventId` (required), `title` (optional), `description` (optional), `start` (optional, ISO 8601), `end` (optional, ISO 8601), `location` (optional), `participants` (optional array), `recurrence` (optional — same format as create)
+- **delete_calendar_event**: Delete a calendar event
+  - Parameters: `eventId` (required)
 
 ### Identity & Testing Tools
 

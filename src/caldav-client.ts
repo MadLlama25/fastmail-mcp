@@ -22,6 +22,37 @@ export interface CalendarEvent {
   start?: string;
   end?: string;
   location?: string;
+  rrule?: string;
+}
+
+export interface RecurrenceInput {
+  frequency: 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY';
+  interval?: number;
+  count?: number;
+  until?: string;
+  byDay?: string;
+  byMonth?: number;
+  byMonthDay?: number;
+}
+
+/**
+ * Build an RRULE string from a structured RecurrenceInput or pass through a raw RRULE string.
+ * Structured form wins — if both are needed, use the structured form.
+ */
+export function parseRecurrence(recurrence: string | RecurrenceInput): string {
+  if (typeof recurrence === 'string') return recurrence;
+
+  const parts: string[] = [`FREQ=${recurrence.frequency}`];
+  if (recurrence.interval !== undefined) parts.push(`INTERVAL=${recurrence.interval}`);
+  if (recurrence.count !== undefined) parts.push(`COUNT=${recurrence.count}`);
+  if (recurrence.until !== undefined) {
+    parts.push(`UNTIL=${validateAndFormatICalDate(recurrence.until, 'recurrence.until')}`);
+  }
+  if (recurrence.byDay !== undefined) parts.push(`BYDAY=${recurrence.byDay}`);
+  if (recurrence.byMonth !== undefined) parts.push(`BYMONTH=${recurrence.byMonth}`);
+  if (recurrence.byMonthDay !== undefined) parts.push(`BYMONTHDAY=${recurrence.byMonthDay}`);
+
+  return parts.join(';');
 }
 
 /**
@@ -100,6 +131,7 @@ export function parseCalendarObject(obj: DAVCalendarObject): CalendarEvent {
   const rawEnd = parseICalValue(vevent, 'DTEND');
   const location = parseICalValue(vevent, 'LOCATION');
   const uid = parseICalValue(vevent, 'UID') || obj.url || '';
+  const rrule = parseICalValue(vevent, 'RRULE');
 
   return {
     id: uid,
@@ -109,6 +141,7 @@ export function parseCalendarObject(obj: DAVCalendarObject): CalendarEvent {
     start: formatICalDate(rawStart),
     end: formatICalDate(rawEnd),
     location: location ? unescapeICalText(location) : undefined,
+    rrule: rrule || undefined,
   };
 }
 
@@ -179,6 +212,34 @@ export function validateAndFormatICalDate(value: string, fieldName: string): str
   // UTC or offset: normalize to UTC instant
   const utc = d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
   return utc;
+}
+
+function buildICalString(params: {
+  uid: string;
+  now: string;
+  dtstart: string;
+  dtend: string;
+  title: string;
+  description?: string;
+  location?: string;
+  rrule?: string;
+}): string {
+  return [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//fastmail-mcp//CalDAV//EN',
+    'BEGIN:VEVENT',
+    `UID:${params.uid}`,
+    `DTSTAMP:${params.now}`,
+    `DTSTART:${params.dtstart}`,
+    `DTEND:${params.dtend}`,
+    `SUMMARY:${escapeICalText(params.title)}`,
+    params.rrule ? `RRULE:${params.rrule}` : '',
+    params.description ? `DESCRIPTION:${escapeICalText(params.description)}` : '',
+    params.location ? `LOCATION:${escapeICalText(params.location)}` : '',
+    'END:VEVENT',
+    'END:VCALENDAR',
+  ].filter(Boolean).join('\r\n');
 }
 
 export class CalDAVCalendarClient {
@@ -290,6 +351,7 @@ export class CalDAVCalendarClient {
     start: string;
     end: string;
     location?: string;
+    recurrence?: string | RecurrenceInput;
   }): Promise<string> {
     const client = await this.getClient();
 
@@ -308,21 +370,9 @@ export class CalDAVCalendarClient {
     const now = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
     const dtstart = validateAndFormatICalDate(event.start, 'event.start');
     const dtend = validateAndFormatICalDate(event.end, 'event.end');
-    const ical = [
-      'BEGIN:VCALENDAR',
-      'VERSION:2.0',
-      'PRODID:-//fastmail-mcp//CalDAV//EN',
-      'BEGIN:VEVENT',
-      `UID:${uid}`,
-      `DTSTAMP:${now}`,
-      `DTSTART:${dtstart}`,
-      `DTEND:${dtend}`,
-      `SUMMARY:${escapeICalText(event.title)}`,
-      event.description ? `DESCRIPTION:${escapeICalText(event.description)}` : '',
-      event.location ? `LOCATION:${escapeICalText(event.location)}` : '',
-      'END:VEVENT',
-      'END:VCALENDAR',
-    ].filter(Boolean).join('\r\n');
+    const rrule = event.recurrence !== undefined ? parseRecurrence(event.recurrence) : undefined;
+
+    const ical = buildICalString({ uid, now, dtstart, dtend, title: event.title, description: event.description, location: event.location, rrule });
 
     await client.createCalendarObject({
       calendar: targetCal,
@@ -331,5 +381,98 @@ export class CalDAVCalendarClient {
     });
 
     return uid;
+  }
+
+  private async findCalendarObject(eventId: string): Promise<{ obj: DAVCalendarObject; cal: DAVCalendar } | null> {
+    const client = await this.getClient();
+
+    if (!this.calendars) {
+      this.calendars = await client.fetchCalendars();
+    }
+
+    for (const cal of this.calendars) {
+      const objects = await client.fetchCalendarObjects({ calendar: cal });
+      for (const obj of objects) {
+        const vevent = extractVEvent(obj.data || '');
+        const uid = parseICalValue(vevent, 'UID');
+        if (uid === eventId || obj.url === eventId) {
+          return { obj, cal };
+        }
+      }
+    }
+
+    return null;
+  }
+
+  async updateCalendarEvent(eventId: string, updates: {
+    title?: string;
+    description?: string;
+    start?: string;
+    end?: string;
+    location?: string;
+    recurrence?: string | RecurrenceInput;
+  }): Promise<void> {
+    const client = await this.getClient();
+    const found = await this.findCalendarObject(eventId);
+    if (!found) {
+      throw new Error(`Calendar event not found: ${eventId}`);
+    }
+    const { obj } = found;
+
+    const vevent = extractVEvent(obj.data || '');
+    const existingTitle = unescapeICalText(parseICalValue(vevent, 'SUMMARY') || 'Untitled');
+    const existingDescription = parseICalValue(vevent, 'DESCRIPTION');
+    const existingStart = parseICalValue(vevent, 'DTSTART');
+    const existingEnd = parseICalValue(vevent, 'DTEND');
+    const existingLocation = parseICalValue(vevent, 'LOCATION');
+    const uid = parseICalValue(vevent, 'UID') || eventId;
+
+    const title = updates.title ?? existingTitle;
+    const description = updates.description ?? (existingDescription ? unescapeICalText(existingDescription) : undefined);
+    const location = updates.location ?? (existingLocation ? unescapeICalText(existingLocation) : undefined);
+    const now = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+
+    let dtstart: string;
+    if (updates.start) {
+      dtstart = validateAndFormatICalDate(updates.start, 'event.start');
+    } else if (existingStart) {
+      dtstart = existingStart;
+    } else {
+      throw new Error('Cannot determine start time for update');
+    }
+
+    let dtend: string;
+    if (updates.end) {
+      dtend = validateAndFormatICalDate(updates.end, 'event.end');
+    } else if (existingEnd) {
+      dtend = existingEnd;
+    } else {
+      throw new Error('Cannot determine end time for update');
+    }
+
+    let rrule: string | undefined;
+    if (updates.recurrence !== undefined) {
+      rrule = parseRecurrence(updates.recurrence);
+    } else {
+      rrule = parseICalValue(vevent, 'RRULE');
+    }
+
+    const ical = buildICalString({ uid, now, dtstart, dtend, title, description, location, rrule });
+
+    await client.updateCalendarObject({
+      calendarObject: { url: obj.url, etag: obj.etag, data: ical },
+    });
+  }
+
+  async deleteCalendarEvent(eventId: string): Promise<void> {
+    const client = await this.getClient();
+    const found = await this.findCalendarObject(eventId);
+    if (!found) {
+      throw new Error(`Calendar event not found: ${eventId}`);
+    }
+    const { obj } = found;
+    await client.deleteCalendarObject({
+      calendarObject: { url: obj.url, etag: obj.etag },
+    });
   }
 }

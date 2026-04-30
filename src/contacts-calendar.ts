@@ -259,4 +259,198 @@ export class ContactsCalendarClient extends JmapClient {
       throw new Error(`Calendar event creation not supported: ${error instanceof Error ? error.message : String(error)}. Try checking account permissions or enabling calendar API access in Fastmail settings.`);
     }
   }
+
+  async updateCalendarEvent(eventId: string, updates: {
+    title?: string;
+    description?: string;
+    start?: string;
+    end?: string;
+    location?: string;
+    participants?: Array<{ email: string; name?: string }>;
+  }): Promise<void> {
+    const hasPermission = await this.checkCalendarsPermission();
+    if (!hasPermission) {
+      throw new Error('Calendar access not available. This account may not have JMAP calendar permissions enabled. Please check your Fastmail account settings or contact support to enable calendar API access.');
+    }
+
+    const session = await this.getSession();
+
+    const patch: Record<string, unknown> = {};
+    if (updates.title !== undefined) patch.title = updates.title;
+    if (updates.description !== undefined) patch.description = updates.description;
+    if (updates.start !== undefined) patch.start = updates.start;
+    if (updates.end !== undefined) patch.end = updates.end;
+    if (updates.location !== undefined) patch.location = updates.location;
+    if (updates.participants !== undefined) patch.participants = updates.participants;
+
+    const request: JmapRequest = {
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:calendars'],
+      methodCalls: [
+        ['CalendarEvent/set', {
+          accountId: session.accountId,
+          update: { [eventId]: patch }
+        }, 'updateEvent']
+      ]
+    };
+
+    try {
+      await this.makeRequest(request);
+    } catch (error) {
+      throw new Error(`Calendar event update not supported: ${error instanceof Error ? error.message : String(error)}. Try checking account permissions or enabling calendar API access in Fastmail settings.`);
+    }
+  }
+
+  async deleteCalendarEvent(eventId: string): Promise<void> {
+    const hasPermission = await this.checkCalendarsPermission();
+    if (!hasPermission) {
+      throw new Error('Calendar access not available. This account may not have JMAP calendar permissions enabled. Please check your Fastmail account settings or contact support to enable calendar API access.');
+    }
+
+    const session = await this.getSession();
+
+    const request: JmapRequest = {
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:calendars'],
+      methodCalls: [
+        ['CalendarEvent/set', {
+          accountId: session.accountId,
+          destroy: [eventId]
+        }, 'deleteEvent']
+      ]
+    };
+
+    try {
+      await this.makeRequest(request);
+    } catch (error) {
+      throw new Error(`Calendar event deletion not supported: ${error instanceof Error ? error.message : String(error)}. Try checking account permissions or enabling calendar API access in Fastmail settings.`);
+    }
+  }
+
+  async createContact(contact: {
+    name: string;
+    emails?: Array<{ type?: string; value: string }>;
+    phones?: Array<{ type?: string; value: string }>;
+    addresses?: Array<{ street?: string; city?: string; country?: string }>;
+    notes?: string;
+  }): Promise<string> {
+    const hasPermission = await this.checkContactsPermission();
+    if (!hasPermission) {
+      throw new Error('Contacts access not available. This account may not have JMAP contacts permissions enabled. Please check your Fastmail account settings or contact support to enable contacts API access.');
+    }
+
+    const session = await this.getSession();
+
+    const card: Record<string, unknown> = {
+      '@type': 'Card',
+      version: '1.0',
+      name: { full: contact.name },
+    };
+
+    if (contact.emails?.length) {
+      card.emails = Object.fromEntries(
+        contact.emails.map((e, i) => [`email${i}`, { '@type': 'EmailAddress', address: e.value }])
+      );
+    }
+    if (contact.phones?.length) {
+      card.phones = Object.fromEntries(
+        contact.phones.map((p, i) => [`phone${i}`, { '@type': 'Phone', number: p.value }])
+      );
+    }
+    if (contact.notes) {
+      card.notes = { note0: { '@type': 'Note', note: contact.notes } };
+    }
+
+    const request: JmapRequest = {
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:contacts'],
+      methodCalls: [
+        ['ContactCard/set', {
+          accountId: session.accountId,
+          create: { newCard: card }
+        }, 'createCard']
+      ]
+    };
+
+    try {
+      const response = await this.makeRequest(request);
+      const result = this.getMethodResult(response, 0);
+      const contactId = result.created?.newCard?.id;
+      if (!contactId) {
+        throw new Error('Contact creation returned no ID');
+      }
+      return contactId;
+    } catch (error) {
+      throw new Error(`Contact creation not supported: ${error instanceof Error ? error.message : String(error)}. Try checking account permissions or enabling contacts API access in Fastmail settings.`);
+    }
+  }
+
+  async updateContact(contactId: string, updates: {
+    name?: string;
+    emails?: Array<{ type?: string; value: string }>;
+    phones?: Array<{ type?: string; value: string }>;
+    addresses?: Array<{ street?: string; city?: string; country?: string }>;
+    notes?: string;
+  }): Promise<void> {
+    const hasPermission = await this.checkContactsPermission();
+    if (!hasPermission) {
+      throw new Error('Contacts access not available. This account may not have JMAP contacts permissions enabled. Please check your Fastmail account settings or contact support to enable contacts API access.');
+    }
+
+    const session = await this.getSession();
+
+    const patch: Record<string, unknown> = {};
+    if (updates.name !== undefined) patch['name/full'] = updates.name;
+    if (updates.emails !== undefined) {
+      patch.emails = Object.fromEntries(
+        updates.emails.map((e, i) => [`email${i}`, { '@type': 'EmailAddress', address: e.value }])
+      );
+    }
+    if (updates.phones !== undefined) {
+      patch.phones = Object.fromEntries(
+        updates.phones.map((p, i) => [`phone${i}`, { '@type': 'Phone', number: p.value }])
+      );
+    }
+    if (updates.notes !== undefined) {
+      patch.notes = { note0: { '@type': 'Note', note: updates.notes } };
+    }
+
+    const request: JmapRequest = {
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:contacts'],
+      methodCalls: [
+        ['ContactCard/set', {
+          accountId: session.accountId,
+          update: { [contactId]: patch }
+        }, 'updateCard']
+      ]
+    };
+
+    try {
+      await this.makeRequest(request);
+    } catch (error) {
+      throw new Error(`Contact update not supported: ${error instanceof Error ? error.message : String(error)}. Try checking account permissions or enabling contacts API access in Fastmail settings.`);
+    }
+  }
+
+  async deleteContact(contactId: string): Promise<void> {
+    const hasPermission = await this.checkContactsPermission();
+    if (!hasPermission) {
+      throw new Error('Contacts access not available. This account may not have JMAP contacts permissions enabled. Please check your Fastmail account settings or contact support to enable contacts API access.');
+    }
+
+    const session = await this.getSession();
+
+    const request: JmapRequest = {
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:contacts'],
+      methodCalls: [
+        ['ContactCard/set', {
+          accountId: session.accountId,
+          destroy: [contactId]
+        }, 'deleteCard']
+      ]
+    };
+
+    try {
+      await this.makeRequest(request);
+    } catch (error) {
+      throw new Error(`Contact deletion not supported: ${error instanceof Error ? error.message : String(error)}. Try checking account permissions or enabling contacts API access in Fastmail settings.`);
+    }
+  }
 }

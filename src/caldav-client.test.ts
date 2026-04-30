@@ -7,6 +7,7 @@ import {
   parseCalendarObject,
   escapeICalText,
   validateAndFormatICalDate,
+  parseRecurrence,
   CalDAVCalendarClient,
 } from './caldav-client.js';
 
@@ -410,5 +411,312 @@ describe('validateAndFormatICalDate', () => {
     } catch (e) {
       assert.match((e as Error).message, /event\.end/);
     }
+  });
+});
+
+describe('parseRecurrence', () => {
+  it('passes through a raw RRULE string unchanged', () => {
+    assert.equal(parseRecurrence('FREQ=YEARLY;BYMONTH=4;BYMONTHDAY=29'), 'FREQ=YEARLY;BYMONTH=4;BYMONTHDAY=29');
+  });
+
+  it('builds RRULE from structured object — yearly by month+day', () => {
+    const result = parseRecurrence({ frequency: 'YEARLY', byMonth: 4, byMonthDay: 29 });
+    assert.ok(result.startsWith('FREQ=YEARLY'), 'must start with FREQ');
+    assert.ok(result.includes('BYMONTH=4'), 'must include BYMONTH');
+    assert.ok(result.includes('BYMONTHDAY=29'), 'must include BYMONTHDAY');
+  });
+
+  it('builds RRULE from structured object — weekly with interval and count', () => {
+    const result = parseRecurrence({ frequency: 'WEEKLY', interval: 2, count: 10, byDay: 'MO,WE,FR' });
+    assert.ok(result.includes('FREQ=WEEKLY'));
+    assert.ok(result.includes('INTERVAL=2'));
+    assert.ok(result.includes('COUNT=10'));
+    assert.ok(result.includes('BYDAY=MO,WE,FR'));
+  });
+
+  it('normalizes until date via validateAndFormatICalDate', () => {
+    const result = parseRecurrence({ frequency: 'DAILY', until: '2027-12-31' });
+    assert.ok(result.includes('UNTIL=20271231'), `got: ${result}`);
+  });
+});
+
+describe('parseCalendarObject — rrule field', () => {
+  it('extracts RRULE from a recurring event', () => {
+    const data = [
+      'BEGIN:VCALENDAR',
+      'BEGIN:VEVENT',
+      'UID:recur1@fastmail',
+      'DTSTART:20270429T213300Z',
+      'DTEND:20270429T223300Z',
+      'SUMMARY:Free frosty keychain',
+      'RRULE:FREQ=YEARLY;BYMONTH=4;BYMONTHDAY=29',
+      'END:VEVENT',
+      'END:VCALENDAR',
+    ].join('\r\n');
+
+    const event = parseCalendarObject({ data, url: 'https://caldav.example.com/cal/recur1.ics' });
+    assert.equal(event.rrule, 'FREQ=YEARLY;BYMONTH=4;BYMONTHDAY=29');
+    assert.equal(event.title, 'Free frosty keychain');
+  });
+
+  it('returns undefined rrule for non-recurring events', () => {
+    const data = [
+      'BEGIN:VCALENDAR',
+      'BEGIN:VEVENT',
+      'UID:norule@fastmail',
+      'DTSTART:20270429T213300Z',
+      'SUMMARY:One-off',
+      'END:VEVENT',
+      'END:VCALENDAR',
+    ].join('\r\n');
+
+    const event = parseCalendarObject({ data, url: '' });
+    assert.equal(event.rrule, undefined);
+  });
+});
+
+describe('CalDAVCalendarClient — createCalendarEvent with recurrence', () => {
+  function createMockedClientForCreate() {
+    const client = new CalDAVCalendarClient({ username: 'test', password: 'test' });
+    const createdIcals: string[] = [];
+    const mockDAVClient = {
+      login: mock.fn(async () => {}),
+      fetchCalendars: mock.fn(async () => [
+        { displayName: 'Personal', url: '/cal/personal/' },
+      ]),
+      createCalendarObject: mock.fn(async (params: any) => {
+        createdIcals.push(params.iCalString);
+        return {};
+      }),
+    };
+    (client as any).client = mockDAVClient;
+    return { client, mockDAVClient, createdIcals };
+  }
+
+  it('embeds RRULE inside VEVENT, not at top level', async () => {
+    const { client, createdIcals } = createMockedClientForCreate();
+    await client.createCalendarEvent({
+      calendarId: '/cal/personal/',
+      title: 'Free frosty keychain',
+      start: '2027-04-29T21:33:00-07:00',
+      end: '2027-04-29T22:33:00-07:00',
+      recurrence: { frequency: 'YEARLY', byMonth: 4, byMonthDay: 29 },
+    });
+
+    assert.equal(createdIcals.length, 1);
+    const ical = createdIcals[0];
+
+    // RRULE must be inside VEVENT
+    const veventMatch = ical.match(/BEGIN:VEVENT[\s\S]*?END:VEVENT/);
+    assert.ok(veventMatch, 'must have VEVENT block');
+    const vevent = veventMatch![0];
+    assert.ok(vevent.includes('RRULE:'), 'RRULE must be inside VEVENT');
+
+    // RRULE must NOT appear between VCALENDAR and VEVENT
+    const beforeVevent = ical.split('BEGIN:VEVENT')[0];
+    assert.ok(!beforeVevent.includes('RRULE:'), 'RRULE must not appear before VEVENT');
+
+    // RRULE must NOT appear between END:VEVENT and END:VCALENDAR
+    const afterVevent = ical.split('END:VEVENT')[1] || '';
+    assert.ok(!afterVevent.includes('RRULE:'), 'RRULE must not appear after VEVENT');
+
+    assert.ok(ical.includes('FREQ=YEARLY'), 'RRULE must contain FREQ=YEARLY');
+  });
+
+  it('creates event without RRULE when recurrence is not provided', async () => {
+    const { client, createdIcals } = createMockedClientForCreate();
+    await client.createCalendarEvent({
+      calendarId: '/cal/personal/',
+      title: 'One-off',
+      start: '2027-04-29T21:33:00Z',
+      end: '2027-04-29T22:33:00Z',
+    });
+
+    const ical = createdIcals[0];
+    assert.ok(!ical.includes('RRULE:'), 'should not have RRULE for non-recurring event');
+  });
+});
+
+describe('CalDAVCalendarClient — updateCalendarEvent', () => {
+  function makeIcalWithRrule(uid: string): string {
+    return [
+      'BEGIN:VCALENDAR',
+      'BEGIN:VEVENT',
+      `UID:${uid}`,
+      'DTSTART:20270429T213300Z',
+      'DTEND:20270429T223300Z',
+      'SUMMARY:Free frosty keychain',
+      'END:VEVENT',
+      'END:VCALENDAR',
+    ].join('\r\n');
+  }
+
+  function createMockedClientForUpdate(uid: string) {
+    const client = new CalDAVCalendarClient({ username: 'test', password: 'test' });
+    const updatedObjects: any[] = [];
+    const mockDAVClient = {
+      login: mock.fn(async () => {}),
+      fetchCalendars: mock.fn(async () => [
+        { displayName: 'Personal', url: '/cal/personal/' },
+      ]),
+      fetchCalendarObjects: mock.fn(async () => [
+        { data: makeIcalWithRrule(uid), url: `/cal/personal/${uid}.ics`, etag: '"etag123"' },
+      ]),
+      updateCalendarObject: mock.fn(async (params: any) => {
+        updatedObjects.push(params.calendarObject);
+        return {};
+      }),
+    };
+    (client as any).client = mockDAVClient;
+    return { client, mockDAVClient, updatedObjects };
+  }
+
+  it('calls updateCalendarObject with correct url and new iCalString', async () => {
+    const uid = '1777523653761-r2ohjha07qq@fastmail-mcp';
+    const { client, updatedObjects } = createMockedClientForUpdate(uid);
+
+    await client.updateCalendarEvent(uid, {
+      recurrence: 'FREQ=YEARLY;BYMONTH=4;BYMONTHDAY=29',
+    });
+
+    assert.equal(updatedObjects.length, 1);
+    const co = updatedObjects[0];
+    assert.equal(co.url, `/cal/personal/${uid}.ics`);
+    assert.equal(co.etag, '"etag123"');
+    assert.ok(typeof co.data === 'string', 'data must be a string (iCalString)');
+    assert.ok(co.data.includes('RRULE:FREQ=YEARLY;BYMONTH=4;BYMONTHDAY=29'), 'must embed RRULE');
+    // RRULE must be inside VEVENT
+    const vevent = co.data.match(/BEGIN:VEVENT[\s\S]*?END:VEVENT/)?.[0] ?? '';
+    assert.ok(vevent.includes('RRULE:'), 'RRULE must be inside VEVENT block');
+    assert.ok(co.data.includes('SUMMARY:Free frosty keychain'), 'must preserve existing title');
+  });
+
+  it('preserves existing fields when only recurrence is updated', async () => {
+    const uid = 'test-preserve@fastmail-mcp';
+    const { client, updatedObjects } = createMockedClientForUpdate(uid);
+
+    await client.updateCalendarEvent(uid, { recurrence: { frequency: 'YEARLY' } });
+
+    const data = updatedObjects[0].data;
+    assert.ok(data.includes('DTSTART:20270429T213300Z'), 'must preserve original start');
+    assert.ok(data.includes('DTEND:20270429T223300Z'), 'must preserve original end');
+  });
+
+  it('throws when event not found', async () => {
+    const client = new CalDAVCalendarClient({ username: 'test', password: 'test' });
+    const mockDAVClient = {
+      login: mock.fn(async () => {}),
+      fetchCalendars: mock.fn(async () => [
+        { displayName: 'Personal', url: '/cal/personal/' },
+      ]),
+      fetchCalendarObjects: mock.fn(async () => []),
+    };
+    (client as any).client = mockDAVClient;
+
+    await assert.rejects(
+      () => client.updateCalendarEvent('nonexistent@fastmail-mcp', { title: 'New Title' }),
+      /not found/,
+    );
+  });
+});
+
+describe('CalDAVCalendarClient — deleteCalendarEvent', () => {
+  it('calls deleteCalendarObject with correct url and etag', async () => {
+    const uid = 'delete-me@fastmail-mcp';
+    const ical = [
+      'BEGIN:VCALENDAR',
+      'BEGIN:VEVENT',
+      `UID:${uid}`,
+      'DTSTART:20270101T100000Z',
+      'SUMMARY:To Delete',
+      'END:VEVENT',
+      'END:VCALENDAR',
+    ].join('\r\n');
+
+    const client = new CalDAVCalendarClient({ username: 'test', password: 'test' });
+    const deletedObjects: any[] = [];
+    const mockDAVClient = {
+      login: mock.fn(async () => {}),
+      fetchCalendars: mock.fn(async () => [
+        { displayName: 'Personal', url: '/cal/personal/' },
+      ]),
+      fetchCalendarObjects: mock.fn(async () => [
+        { data: ical, url: `/cal/personal/${uid}.ics`, etag: '"etag456"' },
+      ]),
+      deleteCalendarObject: mock.fn(async (params: any) => {
+        deletedObjects.push(params.calendarObject);
+        return {};
+      }),
+    };
+    (client as any).client = mockDAVClient;
+
+    await client.deleteCalendarEvent(uid);
+
+    assert.equal(deletedObjects.length, 1);
+    assert.equal(deletedObjects[0].url, `/cal/personal/${uid}.ics`);
+    assert.equal(deletedObjects[0].etag, '"etag456"');
+  });
+
+  it('throws when event not found', async () => {
+    const client = new CalDAVCalendarClient({ username: 'test', password: 'test' });
+    const mockDAVClient = {
+      login: mock.fn(async () => {}),
+      fetchCalendars: mock.fn(async () => [
+        { displayName: 'Personal', url: '/cal/personal/' },
+      ]),
+      fetchCalendarObjects: mock.fn(async () => []),
+    };
+    (client as any).client = mockDAVClient;
+
+    await assert.rejects(
+      () => client.deleteCalendarEvent('ghost@fastmail-mcp'),
+      /not found/,
+    );
+  });
+});
+
+// Integration smoke test — requires FASTMAIL_INTEGRATION=1 and CalDAV credentials
+// Skips silently when env var is not set so CI stays clean
+describe('integration: update_calendar_event round-trip (FASTMAIL_INTEGRATION=1)', { skip: !process.env.FASTMAIL_INTEGRATION }, () => {
+  it('creates a recurring event, fetches it, confirms RRULE survived, then deletes it', async () => {
+    const username = process.env.FASTMAIL_CALDAV_USERNAME;
+    const password = process.env.FASTMAIL_CALDAV_PASSWORD;
+    assert.ok(username, 'FASTMAIL_CALDAV_USERNAME required for integration test');
+    assert.ok(password, 'FASTMAIL_CALDAV_PASSWORD required for integration test');
+
+    const client = new CalDAVCalendarClient({ username, password });
+
+    // List calendars to find the default one
+    const calendars = await client.getCalendars();
+    assert.ok(calendars.length > 0, 'must have at least one calendar');
+    const calendarId = calendars[0].url;
+
+    // Create a recurring event
+    const uid = await client.createCalendarEvent({
+      calendarId,
+      title: 'Integration Test Recurring Event',
+      start: '2027-06-15T10:00:00Z',
+      end: '2027-06-15T11:00:00Z',
+      recurrence: { frequency: 'YEARLY', byMonth: 6, byMonthDay: 15 },
+    });
+
+    // Fetch it back
+    const fetched = await client.getCalendarEventById(uid);
+    assert.ok(fetched, 'event must be fetchable after creation');
+    assert.ok(fetched!.rrule, 'RRULE must survive CalDAV round-trip');
+    assert.ok(fetched!.rrule!.includes('FREQ=YEARLY'), `expected YEARLY, got: ${fetched!.rrule}`);
+
+    // Update it to add a different recurrence
+    await client.updateCalendarEvent(uid, {
+      recurrence: 'FREQ=YEARLY;BYMONTH=6;BYMONTHDAY=15;COUNT=5',
+    });
+
+    const updated = await client.getCalendarEventById(uid);
+    assert.ok(updated?.rrule?.includes('COUNT=5'), `updated RRULE must include COUNT=5, got: ${updated?.rrule}`);
+
+    // Clean up
+    await client.deleteCalendarEvent(uid);
+    const gone = await client.getCalendarEventById(uid);
+    assert.equal(gone, null, 'event must be gone after deletion');
   });
 });
