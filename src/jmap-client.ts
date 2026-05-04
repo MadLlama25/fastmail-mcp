@@ -283,7 +283,54 @@ export class JmapClient {
     if (!email) {
       throw new Error(`Email with ID '${id}' not found or not accessible`);
     }
-    
+
+    return email;
+  }
+
+  async getEmailMetadata(id: string): Promise<any> {
+    const session = await this.getSession();
+
+    const request: JmapRequest = {
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
+      methodCalls: [
+        ['Email/get', {
+          accountId: session.accountId,
+          ids: [id],
+          properties: [
+            'id',
+            'threadId',
+            'mailboxIds',
+            'keywords',
+            'receivedAt',
+            'sentAt',
+            'subject',
+            'from',
+            'to',
+            'cc',
+            'bcc',
+            'replyTo',
+            'messageId',
+            'inReplyTo',
+            'references',
+            'size',
+            'hasAttachment',
+          ],
+        }, 'emailMetadata']
+      ]
+    };
+
+    const response = await this.makeRequest(request);
+    const result = this.getMethodResult(response, 0);
+
+    if (result.notFound && result.notFound.includes(id)) {
+      throw new Error(`Email with ID '${id}' not found`);
+    }
+
+    const email = result.list?.[0];
+    if (!email) {
+      throw new Error(`Email with ID '${id}' not found or not accessible`);
+    }
+
     return email;
   }
 

@@ -218,6 +218,20 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: 'get_email_metadata',
+        description: 'Get headers/metadata for an email — sender, recipients, subject, date, threading, mailbox membership, keywords (read/flagged/etc.), size, and whether an attachment is present — but NOT the body, preview, or any rendered text. Useful when a workflow needs to classify or route an email without ingesting its content (e.g. customer-mail least-privilege flows where reading bodies is forbidden, or skills that only need to verify post-archive folder placement). The return shape is the standard JMAP Email object restricted to a strict header-only allowlist.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            emailId: {
+              type: 'string',
+              description: 'ID of the email to retrieve metadata for',
+            },
+          },
+          required: ['emailId'],
+        },
+      },
+      {
         name: 'send_email',
         description: 'Send an email',
         inputSchema: {
@@ -1139,6 +1153,22 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
+      case 'get_email_metadata': {
+        const { emailId } = (args ?? {}) as any;
+        if (!emailId) {
+          throw new McpError(ErrorCode.InvalidParams, 'emailId is required');
+        }
+        const email = await client.getEmailMetadata(emailId);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(email, null, 2),
+            },
+          ],
+        };
+      }
+
       case 'send_email': {
         const { to, cc, bcc, from, mailboxId, subject, textBody, htmlBody, inReplyTo, references, replyTo } = args as any;
         const toArray = coerceStringArray(to);
@@ -1872,7 +1902,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           email: {
             available: true,
             functions: [
-              'list_mailboxes', 'get_mailbox_by_name', 'create_mailbox', 'list_emails', 'get_email', 'send_email',
+              'list_mailboxes', 'get_mailbox_by_name', 'create_mailbox', 'list_emails', 'get_email', 'get_email_metadata', 'send_email',
               'create_draft', 'edit_draft', 'send_draft', 'search_emails',
               'get_recent_emails', 'mark_email_read', 'pin_email', 'delete_email', 'move_email', 'archive_email',
               'get_email_attachments', 'download_attachment', 'advanced_search', 'get_thread',
