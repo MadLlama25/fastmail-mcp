@@ -675,6 +675,24 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: 'archive_email',
+        description: 'Archive an email — move it to the target mailbox AND mark it as read in a single atomic JMAP operation. Equivalent to calling move_email followed by mark_email_read, but in one MCP call and one Email/set patch (the move and the read flag land together or not at all). For trashing an email, use delete_email instead — that follows a different convention and does not auto-mark-read.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            emailId: {
+              type: 'string',
+              description: 'ID of the email to archive',
+            },
+            targetMailboxId: {
+              type: 'string',
+              description: 'ID of the destination mailbox',
+            },
+          },
+          required: ['emailId', 'targetMailboxId'],
+        },
+      },
+      {
         name: 'add_labels',
         description: 'Add labels (mailboxes) to an email without removing existing ones',
         inputSchema: {
@@ -1469,6 +1487,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
+      case 'archive_email': {
+        const { emailId, targetMailboxId } = (args ?? {}) as any;
+        if (!emailId || !targetMailboxId) {
+          throw new McpError(ErrorCode.InvalidParams, 'emailId and targetMailboxId are required');
+        }
+        const client = initializeClient();
+        await client.archiveEmail(emailId, targetMailboxId);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: 'Email archived successfully (moved to target mailbox and marked as read)',
+            },
+          ],
+        };
+      }
+
       case 'add_labels': {
         const { emailId, mailboxIds } = args as any;
         if (!emailId) {
@@ -1753,7 +1788,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             available: true,
             functions: [
               'list_mailboxes', 'list_emails', 'get_email', 'send_email', 'create_draft', 'edit_draft', 'send_draft', 'search_emails',
-              'get_recent_emails', 'mark_email_read', 'pin_email', 'delete_email', 'move_email',
+              'get_recent_emails', 'mark_email_read', 'pin_email', 'delete_email', 'move_email', 'archive_email',
               'get_email_attachments', 'download_attachment', 'advanced_search', 'get_thread',
               'get_mailbox_stats', 'get_account_summary', 'bulk_mark_read', 'bulk_pin', 'bulk_move', 'bulk_delete',
               'add_labels', 'remove_labels', 'bulk_add_labels', 'bulk_remove_labels'
