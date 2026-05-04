@@ -957,6 +957,57 @@ export class JmapClient {
     }
   }
 
+  async archiveEmail(emailId: string, targetMailboxId: string): Promise<void> {
+    const session = await this.getSession();
+
+    const getRequest: JmapRequest = {
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
+      methodCalls: [
+        ['Email/get', {
+          accountId: session.accountId,
+          ids: [emailId],
+          properties: ['mailboxIds']
+        }, 'getEmail']
+      ]
+    };
+    const getResponse = await this.makeRequest(getRequest);
+    const email = this.getListResult(getResponse, 0)[0];
+
+    if (!email) {
+      throw new Error(`Email not found: ${emailId}`);
+    }
+
+    const patch: Record<string, boolean | null> = {};
+    if (email.mailboxIds) {
+      for (const mbId of Object.keys(email.mailboxIds)) {
+        patch[`mailboxIds/${mbId}`] = null;
+      }
+    }
+    patch[`mailboxIds/${targetMailboxId}`] = true;
+    patch['keywords/$seen'] = true;
+
+    const setRequest: JmapRequest = {
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
+      methodCalls: [
+        ['Email/set', {
+          accountId: session.accountId,
+          update: {
+            [emailId]: patch
+          }
+        }, 'archiveEmail']
+      ]
+    };
+
+    const response = await this.makeRequest(setRequest);
+    const result = this.getMethodResult(response, 0);
+
+    if (result.notUpdated && result.notUpdated[emailId]) {
+      const err = result.notUpdated[emailId];
+      const detail = err.description ? ` - ${err.description}` : '';
+      throw new Error(`Failed to archive email: ${err.type}${detail}`);
+    }
+  }
+
   async addLabels(emailId: string, mailboxIds: string[]): Promise<void> {
     const session = await this.getSession();
 
