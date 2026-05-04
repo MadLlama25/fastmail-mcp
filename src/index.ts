@@ -133,10 +133,52 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     tools: [
       {
         name: 'list_mailboxes',
-        description: 'List all mailboxes in the Fastmail account',
+        description: 'List mailboxes in the Fastmail account. By default returns all mailboxes with full metadata; on accounts with hundreds of mailboxes the full result can exceed the MCP tool result window. Use `properties: ["id","name","parentId"]` for a slim view, and/or `parentId` to filter to one level of children.',
         inputSchema: {
           type: 'object',
-          properties: {},
+          properties: {
+            properties: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'JMAP Mailbox properties to return (e.g. ["id","name","parentId"]). Default: all properties. The slim form roughly halves payload size on large accounts.',
+            },
+            parentId: {
+              type: ['string', 'null'],
+              description: 'Filter to direct children of this mailbox ID. Pass null for top-level mailboxes. Filter is applied client-side after Mailbox/get.',
+            },
+          },
+        },
+      },
+      {
+        name: 'get_mailbox_by_name',
+        description: 'Look up a single mailbox by its full path from root (e.g. "Folder/Subfolder/Leaf"). Returns the mailbox ID and minimal metadata, or throws "Mailbox not found" if no exact match. The path separator is "/"; folder names containing a literal "/" are not supported.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            path: {
+              type: 'string',
+              description: 'Full path from root, separated by "/" (e.g. "Inbox" or "Archive/2026/Suppliers/ExampleCo").',
+            },
+          },
+          required: ['path'],
+        },
+      },
+      {
+        name: 'create_mailbox',
+        description: 'Create a new mailbox (folder). Returns the new mailbox ID. The caller is responsible for validating the name is appropriate (length, character set, parent-folder allow-list) before calling — JMAP itself only enforces uniqueness within a parent.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            name: {
+              type: 'string',
+              description: 'Leaf name of the new mailbox (not a full path). Must not contain "/".',
+            },
+            parentId: {
+              type: ['string', 'null'],
+              description: 'Parent mailbox ID. Pass null (or omit) to create at top level.',
+            },
+          },
+          required: ['name'],
         },
       },
       {
@@ -995,12 +1037,55 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     switch (name) {
       case 'list_mailboxes': {
-        const mailboxes = await client.getMailboxes();
+        const { properties, parentId } = (args ?? {}) as any;
+        const options: { properties?: string[]; parentId?: string | null } = {};
+        if (Array.isArray(properties) && properties.length > 0) {
+          options.properties = properties;
+        }
+        if (args && Object.prototype.hasOwnProperty.call(args, 'parentId')) {
+          options.parentId = parentId ?? null;
+        }
+        const mailboxes = await client.getMailboxes(options);
         return {
           content: [
             {
               type: 'text',
               text: JSON.stringify(mailboxes, null, 2),
+            },
+          ],
+        };
+      }
+
+      case 'get_mailbox_by_name': {
+        const { path } = (args ?? {}) as any;
+        if (!path || typeof path !== 'string') {
+          throw new McpError(ErrorCode.InvalidParams, 'path is required and must be a non-empty string');
+        }
+        const mailbox = await client.getMailboxByName(path);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(mailbox, null, 2),
+            },
+          ],
+        };
+      }
+
+      case 'create_mailbox': {
+        const { name: mailboxName, parentId } = (args ?? {}) as any;
+        if (!mailboxName || typeof mailboxName !== 'string') {
+          throw new McpError(ErrorCode.InvalidParams, 'name is required and must be a non-empty string');
+        }
+        if (mailboxName.includes('/')) {
+          throw new McpError(ErrorCode.InvalidParams, 'name must not contain "/" — pass a leaf name and use parentId to nest');
+        }
+        const newId = await client.createMailbox(mailboxName, parentId ?? null);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({ id: newId, name: mailboxName, parentId: parentId ?? null }, null, 2),
             },
           ],
         };
@@ -1752,7 +1837,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           email: {
             available: true,
             functions: [
-              'list_mailboxes', 'list_emails', 'get_email', 'send_email', 'create_draft', 'edit_draft', 'send_draft', 'search_emails',
+              'list_mailboxes', 'get_mailbox_by_name', 'create_mailbox', 'list_emails', 'get_email', 'send_email',
+              'create_draft', 'edit_draft', 'send_draft', 'search_emails',
               'get_recent_emails', 'mark_email_read', 'pin_email', 'delete_email', 'move_email',
               'get_email_attachments', 'download_attachment', 'advanced_search', 'get_thread',
               'get_mailbox_stats', 'get_account_summary', 'bulk_mark_read', 'bulk_pin', 'bulk_move', 'bulk_delete',
