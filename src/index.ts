@@ -216,6 +216,18 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           },
           required: ['emailId'],
         },
+        _meta: {
+          // Raise the per-tool result size limit honoured by Claude Code
+          // (v2.1.91+) and other MCP clients that respect this annotation.
+          // get_email returns the full Email object including textBody/
+          // htmlBody/bodyValues/attachments — promotional newsletters and
+          // policy-update emails routinely exceed the default ~25KB inline
+          // budget and get spilled to a temp file by the harness, which
+          // then forces the caller to do its own file-read recovery.
+          // 500000 chars (~500KB) covers virtually all real-world email
+          // payloads while remaining well under the MCP hard ceiling.
+          'anthropic/maxResultSizeChars': 500000,
+        },
       },
       {
         name: 'get_email_metadata',
