@@ -139,18 +139,94 @@ export class JmapClient {
            (nameFallback ? mailboxes.find(mb => mb.name.toLowerCase().includes(nameFallback)) : undefined);
   }
 
-  async getMailboxes(): Promise<any[]> {
+  async getMailboxes(options?: { properties?: string[]; parentId?: string | null }): Promise<any[]> {
     const session = await this.getSession();
-    
+
+    const args: Record<string, any> = { accountId: session.accountId };
+    if (options?.properties && options.properties.length > 0) {
+      args.properties = options.properties;
+    }
+
     const request: JmapRequest = {
       using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
       methodCalls: [
-        ['Mailbox/get', { accountId: session.accountId }, 'mailboxes']
+        ['Mailbox/get', args, 'mailboxes']
       ]
     };
 
     const response = await this.makeRequest(request);
-    return this.getListResult(response, 0);
+    let list = this.getListResult(response, 0);
+    if (options && Object.prototype.hasOwnProperty.call(options, 'parentId')) {
+      const filterParent = options.parentId ?? null;
+      list = list.filter((mb: any) => (mb.parentId ?? null) === filterParent);
+    }
+    return list;
+  }
+
+  async getMailboxByName(path: string): Promise<{ id: string; name: string; parentId: string | null; path: string }> {
+    if (!path || typeof path !== 'string') {
+      throw new Error('path is required and must be a non-empty string');
+    }
+    const mailboxes = await this.getMailboxes({ properties: ['id', 'name', 'parentId'] });
+    const byId = new Map<string, any>();
+    for (const mb of mailboxes) byId.set(mb.id, mb);
+
+    const buildPath = (mb: any): string => {
+      const segments: string[] = [];
+      let cursor: any = mb;
+      let depth = 0;
+      while (cursor && depth < 100) {
+        segments.unshift(cursor.name);
+        cursor = cursor.parentId ? byId.get(cursor.parentId) : null;
+        depth++;
+      }
+      return segments.join('/');
+    };
+
+    for (const mb of mailboxes) {
+      if (buildPath(mb) === path) {
+        return { id: mb.id, name: mb.name, parentId: mb.parentId ?? null, path };
+      }
+    }
+    throw new Error(`Mailbox not found: ${path}`);
+  }
+
+  async createMailbox(name: string, parentId?: string | null): Promise<string> {
+    if (!name || typeof name !== 'string') {
+      throw new Error('name is required and must be a non-empty string');
+    }
+    const session = await this.getSession();
+
+    const request: JmapRequest = {
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
+      methodCalls: [
+        ['Mailbox/set', {
+          accountId: session.accountId,
+          create: {
+            new1: {
+              name,
+              parentId: parentId ?? null
+            }
+          }
+        }, 'createMailbox']
+      ]
+    };
+
+    const response = await this.makeRequest(request);
+    const result = this.getMethodResult(response, 0);
+
+    if (result.notCreated && result.notCreated.new1) {
+      const err = result.notCreated.new1;
+      const detail = err.description ? ` - ${err.description}` : '';
+      const props = err.properties ? ` (properties: ${err.properties.join(', ')})` : '';
+      throw new Error(`Failed to create mailbox: ${err.type}${detail}${props}`);
+    }
+
+    const created = result.created?.new1;
+    if (!created?.id) {
+      throw new Error('Mailbox creation reported success but server did not return an ID');
+    }
+    return created.id;
   }
 
   async getEmails(mailboxId?: string, limit: number = 20, ascending: boolean = false): Promise<any[]> {
