@@ -255,6 +255,32 @@ export class JmapClient {
     return this.getListResult(response, 1);
   }
 
+  async getEmailsMetadata(mailboxId?: string, limit: number = 20, ascending: boolean = false): Promise<any[]> {
+    const session = await this.getSession();
+
+    const filter = mailboxId ? { inMailbox: mailboxId } : {};
+
+    const request: JmapRequest = {
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
+      methodCalls: [
+        ['Email/query', {
+          accountId: session.accountId,
+          filter,
+          sort: [{ property: 'receivedAt', isAscending: ascending }],
+          limit
+        }, 'query'],
+        ['Email/get', {
+          accountId: session.accountId,
+          '#ids': { resultOf: 'query', name: 'Email/query', path: '/ids' },
+          properties: ['id', 'threadId', 'subject', 'from', 'to', 'replyTo', 'receivedAt', 'hasAttachment', 'keywords']
+        }, 'emails']
+      ]
+    };
+
+    const response = await this.makeRequest(request);
+    return this.getListResult(response, 1);
+  }
+
   async getEmailById(id: string): Promise<any> {
     const session = await this.getSession();
     
@@ -1417,6 +1443,69 @@ export class JmapClient {
     return this.getListResult(response, 1);
   }
 
+  async advancedSearchMetadata(filters: {
+    query?: string;
+    from?: string;
+    to?: string;
+    subject?: string;
+    hasAttachment?: boolean;
+    isUnread?: boolean;
+    isPinned?: boolean;
+    mailboxId?: string;
+    after?: string;
+    before?: string;
+    limit?: number;
+    ascending?: boolean;
+  }): Promise<any[]> {
+    const session = await this.getSession();
+
+    // Build JMAP filter object — identical logic to advancedSearch.
+    const filter: any = {};
+
+    if (filters.query) filter.text = filters.query;
+    if (filters.from) filter.from = filters.from;
+    if (filters.to) filter.to = filters.to;
+    if (filters.subject) filter.subject = filters.subject;
+    if (filters.hasAttachment !== undefined) filter.hasAttachment = filters.hasAttachment;
+    if (filters.isUnread === true) filter.notKeyword = '$seen';
+    else if (filters.isUnread === false) filter.hasKeyword = '$seen';
+    if (filters.isPinned === true) filter.hasKeyword = '$flagged';
+    if (filters.isPinned === false) filter.notKeyword = '$flagged';
+    if (filters.mailboxId) filter.inMailbox = filters.mailboxId;
+    if (filters.after) filter.after = filters.after;
+    if (filters.before) filter.before = filters.before;
+
+    let finalFilter: any = filter;
+    if (filters.isUnread !== undefined && filters.isPinned !== undefined) {
+      delete filter.hasKeyword;
+      delete filter.notKeyword;
+      const conditions: any[] = [filter];
+      conditions.push(filters.isUnread ? { notKeyword: '$seen' } : { hasKeyword: '$seen' });
+      conditions.push(filters.isPinned ? { hasKeyword: '$flagged' } : { notKeyword: '$flagged' });
+      finalFilter = { operator: 'AND', conditions };
+    }
+
+    const request: JmapRequest = {
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
+      methodCalls: [
+        ['Email/query', {
+          accountId: session.accountId,
+          filter: finalFilter,
+          sort: [{ property: 'receivedAt', isAscending: filters.ascending ?? false }],
+          limit: Math.min(filters.limit || 50, 100)
+        }, 'query'],
+        ['Email/get', {
+          accountId: session.accountId,
+          '#ids': { resultOf: 'query', name: 'Email/query', path: '/ids' },
+          properties: ['id', 'threadId', 'subject', 'from', 'to', 'cc', 'replyTo', 'receivedAt', 'hasAttachment', 'keywords']
+        }, 'emails']
+      ]
+    };
+
+    const response = await this.makeRequest(request);
+    return this.getListResult(response, 1);
+  }
+
   async searchEmails(query: string, limit: number = 20, ascending: boolean = false): Promise<any[]> {
     const session = await this.getSession();
 
@@ -1433,6 +1522,30 @@ export class JmapClient {
           accountId: session.accountId,
           '#ids': { resultOf: 'query', name: 'Email/query', path: '/ids' },
           properties: ['id', 'subject', 'from', 'to', 'replyTo', 'receivedAt', 'preview', 'hasAttachment']
+        }, 'emails']
+      ]
+    };
+
+    const response = await this.makeRequest(request);
+    return this.getListResult(response, 1);
+  }
+
+  async searchEmailsMetadata(query: string, limit: number = 20, ascending: boolean = false): Promise<any[]> {
+    const session = await this.getSession();
+
+    const request: JmapRequest = {
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
+      methodCalls: [
+        ['Email/query', {
+          accountId: session.accountId,
+          filter: { text: query },
+          sort: [{ property: 'receivedAt', isAscending: ascending }],
+          limit
+        }, 'query'],
+        ['Email/get', {
+          accountId: session.accountId,
+          '#ids': { resultOf: 'query', name: 'Email/query', path: '/ids' },
+          properties: ['id', 'threadId', 'subject', 'from', 'to', 'replyTo', 'receivedAt', 'hasAttachment', 'keywords']
         }, 'emails']
       ]
     };
@@ -1490,6 +1603,59 @@ export class JmapClient {
     const threadResult = this.getMethodResult(response, 0);
 
     // Check if thread was found
+    if (threadResult.notFound && threadResult.notFound.includes(actualThreadId)) {
+      throw new Error(`Thread with ID '${actualThreadId}' not found`);
+    }
+
+    return this.getListResult(response, 1);
+  }
+
+  async getThreadMetadata(threadId: string): Promise<any[]> {
+    const session = await this.getSession();
+
+    // Resolve threadId — accept either an email ID or a thread ID, mirroring getThread.
+    let actualThreadId = threadId;
+
+    try {
+      const emailRequest: JmapRequest = {
+        using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
+        methodCalls: [
+          ['Email/get', {
+            accountId: session.accountId,
+            ids: [threadId],
+            properties: ['threadId']
+          }, 'checkEmail']
+        ]
+      };
+
+      const emailResponse = await this.makeRequest(emailRequest);
+      const email = this.getListResult(emailResponse, 0)[0];
+
+      if (email && email.threadId) {
+        actualThreadId = email.threadId;
+      }
+    } catch (error) {
+      // If email lookup fails, assume threadId is correct
+    }
+
+    const request: JmapRequest = {
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
+      methodCalls: [
+        ['Thread/get', {
+          accountId: session.accountId,
+          ids: [actualThreadId]
+        }, 'getThread'],
+        ['Email/get', {
+          accountId: session.accountId,
+          '#ids': { resultOf: 'getThread', name: 'Thread/get', path: '/list/*/emailIds' },
+          properties: ['id', 'threadId', 'subject', 'from', 'to', 'cc', 'replyTo', 'receivedAt', 'hasAttachment', 'keywords']
+        }, 'emails']
+      ]
+    };
+
+    const response = await this.makeRequest(request);
+    const threadResult = this.getMethodResult(response, 0);
+
     if (threadResult.notFound && threadResult.notFound.includes(actualThreadId)) {
       throw new Error(`Thread with ID '${actualThreadId}' not found`);
     }
