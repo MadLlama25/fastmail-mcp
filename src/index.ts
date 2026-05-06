@@ -16,7 +16,7 @@ import { coerceStringArray, coerceBool, redactBearerTokens } from './coerce.js';
 const server = new Server(
   {
     name: 'fastmail-mcp',
-    version: '1.9.4',
+    version: '1.10.0',
   },
   {
     capabilities: {
@@ -133,15 +133,79 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     tools: [
       {
         name: 'list_mailboxes',
-        description: 'List all mailboxes in the Fastmail account',
+        description: 'List mailboxes in the Fastmail account. By default returns all mailboxes with full metadata; on accounts with hundreds of mailboxes the full result can exceed the MCP tool result window. Use `properties: ["id","name","parentId"]` for a slim view, and/or `parentId` to filter to one level of children.',
         inputSchema: {
           type: 'object',
-          properties: {},
+          properties: {
+            properties: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'JMAP Mailbox properties to return (e.g. ["id","name","parentId"]). Default: all properties. The slim form roughly halves payload size on large accounts.',
+            },
+            parentId: {
+              type: ['string', 'null'],
+              description: 'Filter to direct children of this mailbox ID. Pass null for top-level mailboxes. Filter is applied client-side after Mailbox/get.',
+            },
+          },
+        },
+      },
+      {
+        name: 'get_mailbox_by_name',
+        description: 'Look up a single mailbox by its full path from root (e.g. "Folder/Subfolder/Leaf"). Returns the mailbox ID and minimal metadata, or throws "Mailbox not found" if no exact match. The path separator is "/"; folder names containing a literal "/" are not supported.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            path: {
+              type: 'string',
+              description: 'Full path from root, separated by "/" (e.g. "Inbox" or "Archive/2026/Suppliers/ExampleCo").',
+            },
+          },
+          required: ['path'],
+        },
+      },
+      {
+        name: 'create_mailbox',
+        description: 'Create a new mailbox (folder). Returns the new mailbox ID. The caller is responsible for validating the name is appropriate (length, character set, parent-folder allow-list) before calling — JMAP itself only enforces uniqueness within a parent.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            name: {
+              type: 'string',
+              description: 'Leaf name of the new mailbox (not a full path). Must not contain "/".',
+            },
+            parentId: {
+              type: ['string', 'null'],
+              description: 'Parent mailbox ID. Pass null (or omit) to create at top level.',
+            },
+          },
+          required: ['name'],
         },
       },
       {
         name: 'list_emails',
         description: 'List emails from a mailbox',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            mailboxId: {
+              type: 'string',
+              description: 'ID of the mailbox to list emails from (optional, defaults to all)',
+            },
+            limit: {
+              type: ['number', 'string'],
+              description: 'Maximum number of emails to return (default: 20)',
+              default: 20,
+            },
+            ascending: {
+              type: 'boolean',
+              description: 'Sort oldest first instead of newest first (default: false)',
+            },
+          },
+        },
+      },
+      {
+        name: 'list_emails_metadata',
+        description: 'Same as list_emails (lists emails from a mailbox, optionally filtered by mailboxId, with paging and sort) but returns ONLY metadata fields on each result — id, threadId, subject, from, to, replyTo, receivedAt, hasAttachment, keywords. Does NOT return preview or any body-derived content. Use in privacy-sensitive flows where the workflow needs only the envelope (e.g. customer-mail least-privilege scans, or any caller forbidden from ingesting message bodies). Pair with get_email_metadata for follow-up lookups that should also stay header-only.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -170,6 +234,32 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             emailId: {
               type: 'string',
               description: 'ID of the email to retrieve',
+            },
+          },
+          required: ['emailId'],
+        },
+        _meta: {
+          // Raise the per-tool result size limit honoured by Claude Code
+          // (v2.1.91+) and other MCP clients that respect this annotation.
+          // get_email returns the full Email object including textBody/
+          // htmlBody/bodyValues/attachments — promotional newsletters and
+          // policy-update emails routinely exceed the default ~25KB inline
+          // budget and get spilled to a temp file by the harness, which
+          // then forces the caller to do its own file-read recovery.
+          // 500000 chars (~500KB) covers virtually all real-world email
+          // payloads while remaining well under the MCP hard ceiling.
+          'anthropic/maxResultSizeChars': 500000,
+        },
+      },
+      {
+        name: 'get_email_metadata',
+        description: 'Get headers/metadata for an email — sender, recipients, subject, date, threading, mailbox membership, keywords (read/flagged/etc.), size, and whether an attachment is present — but NOT the body, preview, or any rendered text. Useful when a workflow needs to classify or route an email without ingesting its content (e.g. customer-mail least-privilege flows where reading bodies is forbidden, or skills that only need to verify post-archive folder placement). The return shape is the standard JMAP Email object restricted to a strict header-only allowlist.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            emailId: {
+              type: 'string',
+              description: 'ID of the email to retrieve metadata for',
             },
           },
           required: ['emailId'],
@@ -434,6 +524,29 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: 'search_emails_metadata',
+        description: 'Same as search_emails (free-text search across subject and body) but returns ONLY metadata on each match — id, threadId, subject, from, to, replyTo, receivedAt, hasAttachment, keywords. The query still searches body text on the server side; only the result envelopes come back, never preview or body excerpts. Use when a content match is required (e.g. "find all messages mentioning X") but the matches must not surface body fragments to the caller.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            query: {
+              type: 'string',
+              description: 'Search query string',
+            },
+            limit: {
+              type: ['number', 'string'],
+              description: 'Maximum number of results (default: 20)',
+              default: 20,
+            },
+            ascending: {
+              type: 'boolean',
+              description: 'Sort oldest first instead of newest first (default: false)',
+            },
+          },
+          required: ['query'],
+        },
+      },
+      {
         name: 'list_contacts',
         description: 'List contacts from the address book',
         inputSchema: {
@@ -675,6 +788,24 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: 'archive_email',
+        description: 'Archive an email — move it to the target mailbox AND mark it as read in a single atomic JMAP operation. Equivalent to calling move_email followed by mark_email_read, but in one MCP call and one Email/set patch (the move and the read flag land together or not at all). For trashing an email, use delete_email instead — that follows a different convention and does not auto-mark-read.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            emailId: {
+              type: 'string',
+              description: 'ID of the email to archive',
+            },
+            targetMailboxId: {
+              type: 'string',
+              description: 'ID of the destination mailbox',
+            },
+          },
+          required: ['emailId', 'targetMailboxId'],
+        },
+      },
+      {
         name: 'add_labels',
         description: 'Add labels (mailboxes) to an email without removing existing ones',
         inputSchema: {
@@ -807,6 +938,64 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: 'advanced_search_metadata',
+        description: 'Same filter capabilities as advanced_search (mailbox membership, sender, recipient, subject, free text, date range, attachment, unread, pinned) but returns ONLY metadata on each match — id, threadId, subject, from, to, cc, replyTo, receivedAt, hasAttachment, keywords. Does NOT return preview or any body-derived content. Use in privacy-sensitive flows where the routing decision is made from headers alone (e.g. customer-mail least-privilege scans, or skills that classify by sender + subject + recipient + thread state). The free-text query still searches body content on the server side; only the result envelope comes back without body excerpts.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            query: {
+              type: 'string',
+              description: 'Text to search for in subject/body',
+            },
+            from: {
+              type: 'string',
+              description: 'Filter by sender email',
+            },
+            to: {
+              type: 'string',
+              description: 'Filter by recipient email',
+            },
+            subject: {
+              type: 'string',
+              description: 'Filter by subject',
+            },
+            hasAttachment: {
+              type: 'boolean',
+              description: 'Filter emails with attachments',
+            },
+            isUnread: {
+              type: 'boolean',
+              description: 'Filter unread emails',
+            },
+            isPinned: {
+              type: 'boolean',
+              description: 'Filter pinned emails',
+            },
+            mailboxId: {
+              type: 'string',
+              description: 'Search within specific mailbox',
+            },
+            after: {
+              type: 'string',
+              description: 'Emails after this date (ISO 8601)',
+            },
+            before: {
+              type: 'string',
+              description: 'Emails before this date (ISO 8601)',
+            },
+            limit: {
+              type: ['number', 'string'],
+              description: 'Maximum results (default: 50)',
+              default: 50,
+            },
+            ascending: {
+              type: 'boolean',
+              description: 'Sort oldest first instead of newest first (default: false)',
+            },
+          },
+        },
+      },
+      {
         name: 'get_thread',
         description: 'Get all emails in a conversation thread',
         inputSchema: {
@@ -815,6 +1004,20 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             threadId: {
               type: 'string',
               description: 'ID of the thread/conversation',
+            },
+          },
+          required: ['threadId'],
+        },
+      },
+      {
+        name: 'get_thread_metadata',
+        description: 'Same as get_thread (enumerate every message in a conversation thread) but returns ONLY metadata on each thread message — id, threadId, subject, from, to, cc, replyTo, receivedAt, hasAttachment, keywords. Does NOT return preview or any body-derived content. Use for thread-state checks (reply-presence detection, sender enumeration, date comparison, read/flagged status) without ingesting message bodies — particularly in customer-mail least-privilege flows where the skill needs to know "did we reply, when, and from which alias" but is forbidden from reading what was said. Accepts either a thread ID or an email ID and resolves to the parent thread, mirroring get_thread.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            threadId: {
+              type: 'string',
+              description: 'ID of the thread/conversation (an email ID is also accepted and will be resolved to its parent thread)',
             },
           },
           required: ['threadId'],
@@ -995,12 +1198,55 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     switch (name) {
       case 'list_mailboxes': {
-        const mailboxes = await client.getMailboxes();
+        const { properties, parentId } = (args ?? {}) as any;
+        const options: { properties?: string[]; parentId?: string | null } = {};
+        if (Array.isArray(properties) && properties.length > 0) {
+          options.properties = properties;
+        }
+        if (args && Object.prototype.hasOwnProperty.call(args, 'parentId')) {
+          options.parentId = parentId ?? null;
+        }
+        const mailboxes = await client.getMailboxes(options);
         return {
           content: [
             {
               type: 'text',
               text: JSON.stringify(mailboxes, null, 2),
+            },
+          ],
+        };
+      }
+
+      case 'get_mailbox_by_name': {
+        const { path } = (args ?? {}) as any;
+        if (!path || typeof path !== 'string') {
+          throw new McpError(ErrorCode.InvalidParams, 'path is required and must be a non-empty string');
+        }
+        const mailbox = await client.getMailboxByName(path);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(mailbox, null, 2),
+            },
+          ],
+        };
+      }
+
+      case 'create_mailbox': {
+        const { name: mailboxName, parentId } = (args ?? {}) as any;
+        if (!mailboxName || typeof mailboxName !== 'string') {
+          throw new McpError(ErrorCode.InvalidParams, 'name is required and must be a non-empty string');
+        }
+        if (mailboxName.includes('/')) {
+          throw new McpError(ErrorCode.InvalidParams, 'name must not contain "/" — pass a leaf name and use parentId to nest');
+        }
+        const newId = await client.createMailbox(mailboxName, parentId ?? null);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({ id: newId, name: mailboxName, parentId: parentId ?? null }, null, 2),
             },
           ],
         };
@@ -1020,12 +1266,42 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
+      case 'list_emails_metadata': {
+        const { mailboxId, limit, ascending } = (args ?? {}) as any;
+        const validLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
+        const emails = await client.getEmailsMetadata(mailboxId, validLimit, !!ascending);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(emails, null, 2),
+            },
+          ],
+        };
+      }
+
       case 'get_email': {
         const { emailId } = args as any;
         if (!emailId) {
           throw new McpError(ErrorCode.InvalidParams, 'emailId is required');
         }
         const email = await client.getEmailById(emailId);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(email, null, 2),
+            },
+          ],
+        };
+      }
+
+      case 'get_email_metadata': {
+        const { emailId } = (args ?? {}) as any;
+        if (!emailId) {
+          throw new McpError(ErrorCode.InvalidParams, 'emailId is required');
+        }
+        const email = await client.getEmailMetadata(emailId);
         return {
           content: [
             {
@@ -1241,6 +1517,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
         const validLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
         const emails = await client.searchEmails(query, validLimit, !!ascending);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(emails, null, 2),
+            },
+          ],
+        };
+      }
+
+      case 'search_emails_metadata': {
+        const { query, limit, ascending } = (args ?? {}) as any;
+        if (!query) {
+          throw new McpError(ErrorCode.InvalidParams, 'query is required');
+        }
+        const validLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
+        const emails = await client.searchEmailsMetadata(query, validLimit, !!ascending);
         return {
           content: [
             {
@@ -1469,6 +1762,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
+      case 'archive_email': {
+        const { emailId, targetMailboxId } = (args ?? {}) as any;
+        if (!emailId || !targetMailboxId) {
+          throw new McpError(ErrorCode.InvalidParams, 'emailId and targetMailboxId are required');
+        }
+        const client = initializeClient();
+        await client.archiveEmail(emailId, targetMailboxId);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: 'Email archived successfully (moved to target mailbox and marked as read)',
+            },
+          ],
+        };
+      }
+
       case 'add_labels': {
         const { emailId, mailboxIds } = args as any;
         if (!emailId) {
@@ -1584,6 +1894,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
+      case 'advanced_search_metadata': {
+        const { query, from, to, subject, hasAttachment, isUnread, isPinned, mailboxId, after, before, limit, ascending } = (args ?? {}) as any;
+        const client = initializeClient();
+        const validLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
+        const emails = await client.advancedSearchMetadata({
+          query, from, to, subject, hasAttachment, isUnread, isPinned, mailboxId, after, before, limit: validLimit, ascending
+        });
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify(emails, null, 2),
+            },
+          ],
+        };
+      }
+
       case 'get_thread': {
         const { threadId } = args as any;
         if (!threadId) {
@@ -1602,6 +1929,27 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           };
         } catch (error) {
           // Provide helpful error information
+          throw new McpError(ErrorCode.InternalError, `Thread access failed: ${redactBearerTokens(error instanceof Error ? error.message : String(error))}`);
+        }
+      }
+
+      case 'get_thread_metadata': {
+        const { threadId } = (args ?? {}) as any;
+        if (!threadId) {
+          throw new McpError(ErrorCode.InvalidParams, 'threadId is required');
+        }
+        const client = initializeClient();
+        try {
+          const thread = await client.getThreadMetadata(threadId);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(thread, null, 2),
+              },
+            ],
+          };
+        } catch (error) {
           throw new McpError(ErrorCode.InternalError, `Thread access failed: ${redactBearerTokens(error instanceof Error ? error.message : String(error))}`);
         }
       }
@@ -1752,9 +2100,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           email: {
             available: true,
             functions: [
-              'list_mailboxes', 'list_emails', 'get_email', 'send_email', 'create_draft', 'edit_draft', 'send_draft', 'search_emails',
-              'get_recent_emails', 'mark_email_read', 'pin_email', 'delete_email', 'move_email',
-              'get_email_attachments', 'download_attachment', 'advanced_search', 'get_thread',
+              'list_mailboxes', 'get_mailbox_by_name', 'create_mailbox', 'list_emails', 'list_emails_metadata', 'get_email', 'get_email_metadata', 'send_email',
+              'create_draft', 'edit_draft', 'send_draft', 'search_emails', 'search_emails_metadata',
+              'get_recent_emails', 'mark_email_read', 'pin_email', 'delete_email', 'move_email', 'archive_email',
+              'get_email_attachments', 'download_attachment', 'advanced_search', 'advanced_search_metadata', 'get_thread', 'get_thread_metadata',
               'get_mailbox_stats', 'get_account_summary', 'bulk_mark_read', 'bulk_pin', 'bulk_move', 'bulk_delete',
               'add_labels', 'remove_labels', 'bulk_add_labels', 'bulk_remove_labels'
             ]

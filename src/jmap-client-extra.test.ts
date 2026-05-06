@@ -626,3 +626,115 @@ describe('ascending sort parameter', () => {
     });
   });
 });
+
+// ---------- *_metadata variants: privacy invariant ----------
+//
+// These tests pin the load-bearing privacy invariant of the four metadata
+// variants: their JMAP `Email/get` properties allowlist must never contain
+// `preview` (or any body-derived field). A future refactor that accidentally
+// re-introduces preview will fail here loudly, rather than silently leaking
+// body excerpts to callers operating under least-privilege constraints.
+
+describe('metadata variants — JMAP properties allowlist', () => {
+  let client: JmapClient;
+
+  beforeEach(() => {
+    client = makeClient();
+  });
+
+  const QUERY_GET_RESPONSE = {
+    methodResponses: [
+      ['Email/query', { ids: ['e1'] }, 'query'],
+      ['Email/get', { list: [{ id: 'e1', subject: 'Test' }] }, 'emails'],
+    ],
+  };
+
+  const FORBIDDEN_PROPERTIES = ['preview', 'textBody', 'htmlBody', 'bodyValues', 'body', 'bodyStructure'];
+
+  function assertNoBodyProperties(props: any) {
+    assert.ok(Array.isArray(props), 'properties must be an array');
+    for (const forbidden of FORBIDDEN_PROPERTIES) {
+      assert.ok(
+        !props.includes(forbidden),
+        `properties allowlist must not contain '${forbidden}' (got: ${JSON.stringify(props)})`,
+      );
+    }
+  }
+
+  it('getEmailsMetadata excludes preview and body fields from Email/get properties', async () => {
+    const makeReq = mock.method(client, 'makeRequest', async () => QUERY_GET_RESPONSE);
+
+    await client.getEmailsMetadata('mb-inbox', 5);
+
+    const props = makeReq.mock.calls[0].arguments[0].methodCalls[1][1].properties;
+    assertNoBodyProperties(props);
+  });
+
+  it('searchEmailsMetadata excludes preview and body fields from Email/get properties', async () => {
+    const makeReq = mock.method(client, 'makeRequest', async () => QUERY_GET_RESPONSE);
+
+    await client.searchEmailsMetadata('test', 10);
+
+    const props = makeReq.mock.calls[0].arguments[0].methodCalls[1][1].properties;
+    assertNoBodyProperties(props);
+  });
+
+  it('advancedSearchMetadata excludes preview and body fields from Email/get properties', async () => {
+    const makeReq = mock.method(client, 'makeRequest', async () => QUERY_GET_RESPONSE);
+
+    await client.advancedSearchMetadata({ query: 'test', mailboxId: 'mb-inbox' });
+
+    const props = makeReq.mock.calls[0].arguments[0].methodCalls[1][1].properties;
+    assertNoBodyProperties(props);
+  });
+
+  it('advancedSearchMetadata preserves the full filter logic of advancedSearch', async () => {
+    // The metadata variant is structurally identical to advancedSearch except
+    // for the property list — confirm filter handling is intact (mailbox,
+    // recipient, attachment, isUnread/isPinned conjunction).
+    const makeReq = mock.method(client, 'makeRequest', async () => QUERY_GET_RESPONSE);
+
+    await client.advancedSearchMetadata({
+      mailboxId: 'mb-inbox',
+      to: 'someone@example.com',
+      hasAttachment: true,
+      isUnread: true,
+      isPinned: true,
+    });
+
+    const filter = makeReq.mock.calls[0].arguments[0].methodCalls[0][1].filter;
+    // When both isUnread and isPinned are set, advancedSearch wraps the
+    // conditions in an AND operator — the metadata variant must do the same.
+    assert.equal(filter.operator, 'AND');
+    assert.ok(Array.isArray(filter.conditions));
+  });
+
+  it('getThreadMetadata excludes preview and body fields when fetching thread emails', async () => {
+    // Two-step: the threadId-resolution probe also calls Email/get, but with
+    // a `properties: ['threadId']` minimum payload — that's fine. The
+    // privacy-critical call is the second `makeRequest` (the Thread/get +
+    // Email/get composite). We only inspect that one's properties list.
+    let callIndex = 0;
+    const makeReq = mock.method(client, 'makeRequest', async () => {
+      callIndex += 1;
+      if (callIndex === 1) {
+        // First call: threadId resolution probe.
+        return { methodResponses: [['Email/get', { list: [{ id: 'e1', threadId: 't1' }] }, 'checkEmail']] };
+      }
+      // Second call: Thread/get + Email/get composite — this is the one that
+      // would leak preview if the allowlist were wrong.
+      return {
+        methodResponses: [
+          ['Thread/get', { list: [{ id: 't1', emailIds: ['e1'] }] }, 'getThread'],
+          ['Email/get', { list: [{ id: 'e1', subject: 'Test' }] }, 'emails'],
+        ],
+      };
+    });
+
+    await client.getThreadMetadata('e1');
+
+    // Inspect the second call's Email/get properties (the composite).
+    const compositeProps = makeReq.mock.calls[1].arguments[0].methodCalls[1][1].properties;
+    assertNoBodyProperties(compositeProps);
+  });
+});
