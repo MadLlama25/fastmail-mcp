@@ -33,6 +33,99 @@ function matchesIdentity(identityEmail: string, address: string): boolean {
   }
   return false;
 }
+
+export interface EmailQueryFilters {
+  query?: string;
+  from?: string;
+  to?: string;
+  subject?: string;
+  hasAttachment?: boolean;
+  isUnread?: boolean;
+  isPinned?: boolean;
+  mailboxId?: string;
+  requiredMailboxIds?: string[];
+  excludeMailboxIds?: string[];
+  after?: string;
+  before?: string;
+  limit?: number;
+  ascending?: boolean;
+}
+
+/**
+ * Build a JMAP Email/query filter from the high-level filter parameters used by
+ * advancedSearch / advancedSearchMetadata.
+ *
+ * Output is one of three shapes:
+ *  - {} when no fields are set (matches all messages)
+ *  - a single FilterCondition object when every field can coexist on one condition
+ *  - { operator: 'AND', conditions: [...] } when JMAP's per-FilterCondition limits
+ *    require splitting across multiple conditions (multi-mailbox AND, or
+ *    hasKeyword/notKeyword conflicts between isUnread and isPinned)
+ *
+ * Exported (rather than file-private) so the test suite can verify the filter
+ * shape directly without round-tripping through a mocked makeRequest.
+ */
+export function buildEmailQueryFilter(filters: EmailQueryFilters): any {
+  // Base FilterCondition: fields that always coexist cleanly on a single condition.
+  const base: any = {};
+  if (filters.query) base.text = filters.query;
+  if (filters.from) base.from = filters.from;
+  if (filters.to) base.to = filters.to;
+  if (filters.subject) base.subject = filters.subject;
+  if (filters.hasAttachment !== undefined) base.hasAttachment = filters.hasAttachment;
+  if (filters.after) base.after = filters.after;
+  if (filters.before) base.before = filters.before;
+  if (filters.excludeMailboxIds && filters.excludeMailboxIds.length > 0) {
+    base.inMailboxOtherThan = filters.excludeMailboxIds;
+  }
+
+  // Combine mailboxId + requiredMailboxIds, de-dup, preserve insertion order.
+  const seenIds = new Set<string>();
+  const requiredMailboxes: string[] = [];
+  const candidateIds = [filters.mailboxId, ...(filters.requiredMailboxIds ?? [])];
+  for (const id of candidateIds) {
+    if (id && !seenIds.has(id)) {
+      seenIds.add(id);
+      requiredMailboxes.push(id);
+    }
+  }
+
+  // A single required mailbox folds into the base condition. Multiple
+  // memberships have to live in separate FilterConditions because JMAP's
+  // inMailbox is singular per condition.
+  if (requiredMailboxes.length === 1) {
+    base.inMailbox = requiredMailboxes[0];
+  }
+
+  // When both isUnread and isPinned are defined, their keyword conditions
+  // can collide on hasKeyword or notKeyword (each is singular per
+  // FilterCondition), so split them across separate conditions.
+  const splitKeywords = filters.isUnread !== undefined && filters.isPinned !== undefined;
+  if (!splitKeywords) {
+    if (filters.isUnread === true) base.notKeyword = '$seen';
+    else if (filters.isUnread === false) base.hasKeyword = '$seen';
+    if (filters.isPinned === true) base.hasKeyword = '$flagged';
+    else if (filters.isPinned === false) base.notKeyword = '$flagged';
+  }
+
+  // Assemble the final shape.
+  const conditions: any[] = [];
+  if (Object.keys(base).length > 0) conditions.push(base);
+
+  if (requiredMailboxes.length > 1) {
+    for (const id of requiredMailboxes) conditions.push({ inMailbox: id });
+  }
+
+  if (splitKeywords) {
+    conditions.push(filters.isUnread ? { notKeyword: '$seen' } : { hasKeyword: '$seen' });
+    conditions.push(filters.isPinned ? { hasKeyword: '$flagged' } : { notKeyword: '$flagged' });
+  }
+
+  if (conditions.length === 0) return {};
+  if (conditions.length === 1) return conditions[0];
+  return { operator: 'AND', conditions };
+}
+
 export class JmapClient {
   private auth: FastmailAuth;
   private session: JmapSession | null = null;
@@ -1378,49 +1471,9 @@ export class JmapClient {
     return { url, bytesWritten: buffer.length };
   }
 
-  async advancedSearch(filters: {
-    query?: string;
-    from?: string;
-    to?: string;
-    subject?: string;
-    hasAttachment?: boolean;
-    isUnread?: boolean;
-    isPinned?: boolean;
-    mailboxId?: string;
-    after?: string;
-    before?: string;
-    limit?: number;
-    ascending?: boolean;
-  }): Promise<any[]> {
+  async advancedSearch(filters: EmailQueryFilters): Promise<any[]> {
     const session = await this.getSession();
-    
-    // Build JMAP filter object
-    const filter: any = {};
-    
-    if (filters.query) filter.text = filters.query;
-    if (filters.from) filter.from = filters.from;
-    if (filters.to) filter.to = filters.to;
-    if (filters.subject) filter.subject = filters.subject;
-    if (filters.hasAttachment !== undefined) filter.hasAttachment = filters.hasAttachment;
-    if (filters.isUnread === true) filter.notKeyword = '$seen';
-    else if (filters.isUnread === false) filter.hasKeyword = '$seen';
-    if (filters.isPinned === true) filter.hasKeyword = '$flagged';
-    if (filters.isPinned === false) filter.notKeyword = '$flagged';
-    if (filters.mailboxId) filter.inMailbox = filters.mailboxId;
-    if (filters.after) filter.after = filters.after;
-    if (filters.before) filter.before = filters.before;
-
-    // When both isUnread and isPinned are set, hasKeyword/notKeyword may conflict.
-    // JMAP FilterCondition only supports one hasKeyword, so wrap in an AND operator.
-    let finalFilter: any = filter;
-    if (filters.isUnread !== undefined && filters.isPinned !== undefined) {
-      delete filter.hasKeyword;
-      delete filter.notKeyword;
-      const conditions: any[] = [filter];
-      conditions.push(filters.isUnread ? { notKeyword: '$seen' } : { hasKeyword: '$seen' });
-      conditions.push(filters.isPinned ? { hasKeyword: '$flagged' } : { notKeyword: '$flagged' });
-      finalFilter = { operator: 'AND', conditions };
-    }
+    const finalFilter = buildEmailQueryFilter(filters);
 
     const request: JmapRequest = {
       using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
@@ -1443,47 +1496,9 @@ export class JmapClient {
     return this.getListResult(response, 1);
   }
 
-  async advancedSearchMetadata(filters: {
-    query?: string;
-    from?: string;
-    to?: string;
-    subject?: string;
-    hasAttachment?: boolean;
-    isUnread?: boolean;
-    isPinned?: boolean;
-    mailboxId?: string;
-    after?: string;
-    before?: string;
-    limit?: number;
-    ascending?: boolean;
-  }): Promise<any[]> {
+  async advancedSearchMetadata(filters: EmailQueryFilters): Promise<any[]> {
     const session = await this.getSession();
-
-    // Build JMAP filter object — identical logic to advancedSearch.
-    const filter: any = {};
-
-    if (filters.query) filter.text = filters.query;
-    if (filters.from) filter.from = filters.from;
-    if (filters.to) filter.to = filters.to;
-    if (filters.subject) filter.subject = filters.subject;
-    if (filters.hasAttachment !== undefined) filter.hasAttachment = filters.hasAttachment;
-    if (filters.isUnread === true) filter.notKeyword = '$seen';
-    else if (filters.isUnread === false) filter.hasKeyword = '$seen';
-    if (filters.isPinned === true) filter.hasKeyword = '$flagged';
-    if (filters.isPinned === false) filter.notKeyword = '$flagged';
-    if (filters.mailboxId) filter.inMailbox = filters.mailboxId;
-    if (filters.after) filter.after = filters.after;
-    if (filters.before) filter.before = filters.before;
-
-    let finalFilter: any = filter;
-    if (filters.isUnread !== undefined && filters.isPinned !== undefined) {
-      delete filter.hasKeyword;
-      delete filter.notKeyword;
-      const conditions: any[] = [filter];
-      conditions.push(filters.isUnread ? { notKeyword: '$seen' } : { hasKeyword: '$seen' });
-      conditions.push(filters.isPinned ? { hasKeyword: '$flagged' } : { notKeyword: '$flagged' });
-      finalFilter = { operator: 'AND', conditions };
-    }
+    const finalFilter = buildEmailQueryFilter(filters);
 
     const request: JmapRequest = {
       using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],

@@ -16,7 +16,7 @@ import { coerceStringArray, coerceBool, redactBearerTokens } from './coerce.js';
 const server = new Server(
   {
     name: 'fastmail-mcp',
-    version: '1.10.0',
+    version: '1.11.0',
   },
   {
     capabilities: {
@@ -881,7 +881,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'advanced_search',
-        description: 'Advanced email search with multiple criteria',
+        description: 'Advanced email search with multiple criteria. Mailbox scoping supports a single mailbox (mailboxId), an intersection of multiple mailboxes (requiredMailboxIds — must be a member of ALL listed mailboxes), and exclusion (excludeMailboxIds — member of NONE of the listed mailboxes), alongside the standard sender / recipient / subject / free-text / date / attachment / unread / pinned filters.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -915,7 +915,17 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             mailboxId: {
               type: 'string',
-              description: 'Search within specific mailbox',
+              description: 'Search within a single mailbox. For an intersection across multiple mailboxes (e.g. Inbox AND a label folder), use requiredMailboxIds instead.',
+            },
+            requiredMailboxIds: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Require membership in ALL of these mailbox IDs (intersection / AND semantic). Use this for queries like "in Inbox AND a label folder" — pass both mailbox IDs in the array. If mailboxId is also passed, it is folded into the intersection (de-duplicated). JMAP cannot express multi-mailbox membership in a single FilterCondition, so this builds a FilterOperator AND over multiple inMailbox conditions on the server.',
+            },
+            excludeMailboxIds: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Exclude emails that are members of ANY of these mailbox IDs (maps to JMAP inMailboxOtherThan). Useful for queries like "in a parent label but not its archive sub-folder". Combines cleanly with mailboxId / requiredMailboxIds.',
             },
             after: {
               type: 'string',
@@ -939,7 +949,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'advanced_search_metadata',
-        description: 'Same filter capabilities as advanced_search (mailbox membership, sender, recipient, subject, free text, date range, attachment, unread, pinned) but returns ONLY metadata on each match — id, threadId, subject, from, to, cc, replyTo, receivedAt, hasAttachment, keywords. Does NOT return preview or any body-derived content. Use in privacy-sensitive flows where the routing decision is made from headers alone (e.g. customer-mail least-privilege scans, or skills that classify by sender + subject + recipient + thread state). The free-text query still searches body content on the server side; only the result envelope comes back without body excerpts.',
+        description: 'Same filter capabilities as advanced_search (single-mailbox scoping via mailboxId, multi-mailbox intersection via requiredMailboxIds, exclusion via excludeMailboxIds, plus sender / recipient / subject / free text / date / attachment / unread / pinned) but returns ONLY metadata on each match — id, threadId, subject, from, to, cc, replyTo, receivedAt, hasAttachment, keywords. Does NOT return preview or any body-derived content. Use in privacy-sensitive flows where the routing decision is made from headers alone — for example, when classifying customer mail by sender / recipient / subject / thread state without ingesting body content. The free-text query still searches body content on the server side; only the result envelope comes back without body excerpts.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -973,7 +983,17 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             mailboxId: {
               type: 'string',
-              description: 'Search within specific mailbox',
+              description: 'Search within a single mailbox. For an intersection across multiple mailboxes (e.g. Inbox AND a label folder), use requiredMailboxIds instead.',
+            },
+            requiredMailboxIds: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Require membership in ALL of these mailbox IDs (intersection / AND semantic). Use this for queries like "in Inbox AND a label folder" — pass both mailbox IDs in the array. If mailboxId is also passed, it is folded into the intersection (de-duplicated). JMAP cannot express multi-mailbox membership in a single FilterCondition, so this builds a FilterOperator AND over multiple inMailbox conditions on the server.',
+            },
+            excludeMailboxIds: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Exclude emails that are members of ANY of these mailbox IDs (maps to JMAP inMailboxOtherThan). Useful for queries like "in a parent label but not its archive sub-folder". Combines cleanly with mailboxId / requiredMailboxIds.',
             },
             after: {
               type: 'string',
@@ -1878,11 +1898,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'advanced_search': {
-        const { query, from, to, subject, hasAttachment, isUnread, isPinned, mailboxId, after, before, limit, ascending } = args as any;
+        const { query, from, to, subject, hasAttachment, isUnread, isPinned, mailboxId, requiredMailboxIds, excludeMailboxIds, after, before, limit, ascending } = args as any;
         const client = initializeClient();
         const validLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
         const emails = await client.advancedSearch({
-          query, from, to, subject, hasAttachment, isUnread, isPinned, mailboxId, after, before, limit: validLimit, ascending
+          query, from, to, subject, hasAttachment, isUnread, isPinned, mailboxId, requiredMailboxIds, excludeMailboxIds, after, before, limit: validLimit, ascending
         });
         return {
           content: [
@@ -1895,11 +1915,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'advanced_search_metadata': {
-        const { query, from, to, subject, hasAttachment, isUnread, isPinned, mailboxId, after, before, limit, ascending } = (args ?? {}) as any;
+        const { query, from, to, subject, hasAttachment, isUnread, isPinned, mailboxId, requiredMailboxIds, excludeMailboxIds, after, before, limit, ascending } = (args ?? {}) as any;
         const client = initializeClient();
         const validLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
         const emails = await client.advancedSearchMetadata({
-          query, from, to, subject, hasAttachment, isUnread, isPinned, mailboxId, after, before, limit: validLimit, ascending
+          query, from, to, subject, hasAttachment, isUnread, isPinned, mailboxId, requiredMailboxIds, excludeMailboxIds, after, before, limit: validLimit, ascending
         });
         return {
           content: [
