@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
-import { JmapClient } from './jmap-client.js';
+import { JmapClient, buildEmailQueryFilter } from './jmap-client.js';
 import { FastmailAuth } from './auth.js';
 
 // ---------- helpers ----------
@@ -624,5 +624,321 @@ describe('ascending sort parameter', () => {
       const sort = makeReq.mock.calls[0].arguments[0].methodCalls[0][1].sort;
       assert.deepEqual(sort, [{ property: 'receivedAt', isAscending: true }]);
     });
+  });
+});
+
+// ---------- *_metadata variants: privacy invariant ----------
+//
+// These tests pin the load-bearing privacy invariant of the four metadata
+// variants: their JMAP `Email/get` properties allowlist must never contain
+// `preview` (or any body-derived field). A future refactor that accidentally
+// re-introduces preview will fail here loudly, rather than silently leaking
+// body excerpts to callers operating under least-privilege constraints.
+
+describe('metadata variants — JMAP properties allowlist', () => {
+  let client: JmapClient;
+
+  beforeEach(() => {
+    client = makeClient();
+  });
+
+  const QUERY_GET_RESPONSE = {
+    methodResponses: [
+      ['Email/query', { ids: ['e1'] }, 'query'],
+      ['Email/get', { list: [{ id: 'e1', subject: 'Test' }] }, 'emails'],
+    ],
+  };
+
+  const FORBIDDEN_PROPERTIES = ['preview', 'textBody', 'htmlBody', 'bodyValues', 'body', 'bodyStructure'];
+
+  function assertNoBodyProperties(props: any) {
+    assert.ok(Array.isArray(props), 'properties must be an array');
+    for (const forbidden of FORBIDDEN_PROPERTIES) {
+      assert.ok(
+        !props.includes(forbidden),
+        `properties allowlist must not contain '${forbidden}' (got: ${JSON.stringify(props)})`,
+      );
+    }
+  }
+
+  it('getEmailsMetadata excludes preview and body fields from Email/get properties', async () => {
+    const makeReq = mock.method(client, 'makeRequest', async () => QUERY_GET_RESPONSE);
+
+    await client.getEmailsMetadata('mb-inbox', 5);
+
+    const props = makeReq.mock.calls[0].arguments[0].methodCalls[1][1].properties;
+    assertNoBodyProperties(props);
+  });
+
+  it('searchEmailsMetadata excludes preview and body fields from Email/get properties', async () => {
+    const makeReq = mock.method(client, 'makeRequest', async () => QUERY_GET_RESPONSE);
+
+    await client.searchEmailsMetadata('test', 10);
+
+    const props = makeReq.mock.calls[0].arguments[0].methodCalls[1][1].properties;
+    assertNoBodyProperties(props);
+  });
+
+  it('advancedSearchMetadata excludes preview and body fields from Email/get properties', async () => {
+    const makeReq = mock.method(client, 'makeRequest', async () => QUERY_GET_RESPONSE);
+
+    await client.advancedSearchMetadata({ query: 'test', mailboxId: 'mb-inbox' });
+
+    const props = makeReq.mock.calls[0].arguments[0].methodCalls[1][1].properties;
+    assertNoBodyProperties(props);
+  });
+
+  it('advancedSearchMetadata preserves the full filter logic of advancedSearch', async () => {
+    // The metadata variant is structurally identical to advancedSearch except
+    // for the property list — confirm filter handling is intact (mailbox,
+    // recipient, attachment, isUnread/isPinned conjunction).
+    const makeReq = mock.method(client, 'makeRequest', async () => QUERY_GET_RESPONSE);
+
+    await client.advancedSearchMetadata({
+      mailboxId: 'mb-inbox',
+      to: 'someone@example.com',
+      hasAttachment: true,
+      isUnread: true,
+      isPinned: true,
+    });
+
+    const filter = makeReq.mock.calls[0].arguments[0].methodCalls[0][1].filter;
+    // When both isUnread and isPinned are set, advancedSearch wraps the
+    // conditions in an AND operator — the metadata variant must do the same.
+    assert.equal(filter.operator, 'AND');
+    assert.ok(Array.isArray(filter.conditions));
+  });
+
+  it('getThreadMetadata excludes preview and body fields when fetching thread emails', async () => {
+    // Two-step: the threadId-resolution probe also calls Email/get, but with
+    // a `properties: ['threadId']` minimum payload — that's fine. The
+    // privacy-critical call is the second `makeRequest` (the Thread/get +
+    // Email/get composite). We only inspect that one's properties list.
+    let callIndex = 0;
+    const makeReq = mock.method(client, 'makeRequest', async () => {
+      callIndex += 1;
+      if (callIndex === 1) {
+        // First call: threadId resolution probe.
+        return { methodResponses: [['Email/get', { list: [{ id: 'e1', threadId: 't1' }] }, 'checkEmail']] };
+      }
+      // Second call: Thread/get + Email/get composite — this is the one that
+      // would leak preview if the allowlist were wrong.
+      return {
+        methodResponses: [
+          ['Thread/get', { list: [{ id: 't1', emailIds: ['e1'] }] }, 'getThread'],
+          ['Email/get', { list: [{ id: 'e1', subject: 'Test' }] }, 'emails'],
+        ],
+      };
+    });
+
+    await client.getThreadMetadata('e1');
+
+    // Inspect the second call's Email/get properties (the composite).
+    const compositeProps = makeReq.mock.calls[1].arguments[0].methodCalls[1][1].properties;
+    assertNoBodyProperties(compositeProps);
+  });
+});
+
+// ---------- buildEmailQueryFilter ----------
+//
+// Direct unit tests for the JMAP filter assembler. These pin the wire-level
+// shapes that advancedSearch / advancedSearchMetadata depend on. The helper is
+// pure, so testing it directly is much cheaper than round-tripping through a
+// mocked makeRequest for every shape.
+
+describe('buildEmailQueryFilter', () => {
+  it('returns an empty filter when no fields are set', () => {
+    assert.deepEqual(buildEmailQueryFilter({}), {});
+  });
+
+  it('passes through standard FilterCondition fields on a flat condition', () => {
+    const filter = buildEmailQueryFilter({
+      query: 'invoice',
+      from: 'a@example.com',
+      to: 'b@example.com',
+      subject: 'Q1 2025',
+      hasAttachment: true,
+      after: '2025-01-01T00:00:00Z',
+      before: '2025-04-01T00:00:00Z',
+    });
+    assert.deepEqual(filter, {
+      text: 'invoice',
+      from: 'a@example.com',
+      to: 'b@example.com',
+      subject: 'Q1 2025',
+      hasAttachment: true,
+      after: '2025-01-01T00:00:00Z',
+      before: '2025-04-01T00:00:00Z',
+    });
+  });
+
+  it('flattens a single mailboxId into a flat FilterCondition', () => {
+    assert.deepEqual(
+      buildEmailQueryFilter({ mailboxId: 'mb-1' }),
+      { inMailbox: 'mb-1' },
+    );
+  });
+
+  it('flattens a single requiredMailboxIds entry to the same shape as mailboxId', () => {
+    const viaArray = buildEmailQueryFilter({ requiredMailboxIds: ['mb-1'] });
+    const viaScalar = buildEmailQueryFilter({ mailboxId: 'mb-1' });
+    assert.deepEqual(viaArray, viaScalar);
+  });
+
+  it('builds FilterOperator AND when requiredMailboxIds has multiple entries', () => {
+    const filter = buildEmailQueryFilter({ requiredMailboxIds: ['mb-1', 'mb-2'] });
+    assert.equal(filter.operator, 'AND');
+    assert.equal(filter.conditions.length, 2);
+    assert.deepEqual(filter.conditions[0], { inMailbox: 'mb-1' });
+    assert.deepEqual(filter.conditions[1], { inMailbox: 'mb-2' });
+  });
+
+  it('combines mailboxId with requiredMailboxIds and de-duplicates overlap', () => {
+    const filter = buildEmailQueryFilter({
+      mailboxId: 'mb-1',
+      requiredMailboxIds: ['mb-1', 'mb-2'], // 'mb-1' duplicates the scalar; should drop
+    });
+    assert.equal(filter.operator, 'AND');
+    assert.equal(filter.conditions.length, 2);
+    assert.deepEqual(filter.conditions[0], { inMailbox: 'mb-1' });
+    assert.deepEqual(filter.conditions[1], { inMailbox: 'mb-2' });
+  });
+
+  it('emits inMailboxOtherThan on a single-condition filter', () => {
+    const filter = buildEmailQueryFilter({
+      mailboxId: 'mb-parent',
+      excludeMailboxIds: ['mb-archive'],
+    });
+    assert.deepEqual(filter, {
+      inMailbox: 'mb-parent',
+      inMailboxOtherThan: ['mb-archive'],
+    });
+  });
+
+  it('emits inMailboxOtherThan inside the AND-base when multi-required is needed', () => {
+    const filter = buildEmailQueryFilter({
+      requiredMailboxIds: ['mb-inbox', 'mb-label'],
+      excludeMailboxIds: ['mb-archive'],
+      isPinned: true,
+    });
+    assert.equal(filter.operator, 'AND');
+    assert.deepEqual(filter.conditions[0], {
+      inMailboxOtherThan: ['mb-archive'],
+      hasKeyword: '$flagged',
+    });
+    assert.deepEqual(filter.conditions[1], { inMailbox: 'mb-inbox' });
+    assert.deepEqual(filter.conditions[2], { inMailbox: 'mb-label' });
+  });
+
+  it('keeps a single keyword condition flat when only one of isUnread/isPinned is set', () => {
+    assert.deepEqual(
+      buildEmailQueryFilter({ mailboxId: 'mb-1', isPinned: true }),
+      { inMailbox: 'mb-1', hasKeyword: '$flagged' },
+    );
+  });
+
+  it('preserves the legacy isUnread+isPinned AND-split when both are set', () => {
+    // Both keyword conditions must be split out of base to avoid
+    // hasKeyword/notKeyword collisions on a single FilterCondition.
+    const filter = buildEmailQueryFilter({
+      mailboxId: 'mb-inbox',
+      isUnread: true,
+      isPinned: true,
+    });
+    assert.equal(filter.operator, 'AND');
+    assert.equal(filter.conditions.length, 3);
+    assert.deepEqual(filter.conditions[0], { inMailbox: 'mb-inbox' });
+    assert.ok(filter.conditions.some((c: any) => c.notKeyword === '$seen'));
+    assert.ok(filter.conditions.some((c: any) => c.hasKeyword === '$flagged'));
+  });
+
+  it('combines every primitive in one shot', () => {
+    const filter = buildEmailQueryFilter({
+      query: 'invoice',
+      hasAttachment: true,
+      requiredMailboxIds: ['mb-inbox', 'mb-receipts'],
+      excludeMailboxIds: ['mb-archive'],
+      isPinned: true,
+      after: '2025-01-01T00:00:00Z',
+    });
+    assert.equal(filter.operator, 'AND');
+    assert.deepEqual(filter.conditions[0], {
+      text: 'invoice',
+      hasAttachment: true,
+      after: '2025-01-01T00:00:00Z',
+      inMailboxOtherThan: ['mb-archive'],
+      hasKeyword: '$flagged',
+    });
+    assert.deepEqual(filter.conditions[1], { inMailbox: 'mb-inbox' });
+    assert.deepEqual(filter.conditions[2], { inMailbox: 'mb-receipts' });
+  });
+
+  it('treats empty requiredMailboxIds and empty excludeMailboxIds as absent', () => {
+    assert.deepEqual(
+      buildEmailQueryFilter({
+        mailboxId: 'mb-1',
+        requiredMailboxIds: [],
+        excludeMailboxIds: [],
+      }),
+      { inMailbox: 'mb-1' },
+    );
+  });
+});
+
+// ---------- advancedSearch / advancedSearchMetadata wiring ----------
+
+describe('advancedSearch and advancedSearchMetadata wire requiredMailboxIds correctly', () => {
+  let client: JmapClient;
+  const QUERY_GET_RESPONSE = {
+    methodResponses: [
+      ['Email/query', { ids: [] }, 'query'],
+      ['Email/get', { list: [] }, 'emails'],
+    ],
+  };
+
+  beforeEach(() => {
+    client = makeClient();
+  });
+
+  it('advancedSearch sends a FilterOperator AND when requiredMailboxIds has 2 entries', async () => {
+    const makeReq = mock.method(client, 'makeRequest', async () => QUERY_GET_RESPONSE);
+
+    await client.advancedSearch({
+      requiredMailboxIds: ['mb-inbox', 'mb-label'],
+      isPinned: true,
+    });
+
+    const filter = makeReq.mock.calls[0].arguments[0].methodCalls[0][1].filter;
+    assert.equal(filter.operator, 'AND');
+    assert.equal(filter.conditions.length, 3);
+    assert.ok(filter.conditions.some((c: any) => c.inMailbox === 'mb-inbox'));
+    assert.ok(filter.conditions.some((c: any) => c.inMailbox === 'mb-label'));
+    assert.ok(filter.conditions.some((c: any) => c.hasKeyword === '$flagged'));
+  });
+
+  it('advancedSearchMetadata sends inMailboxOtherThan when excludeMailboxIds is set', async () => {
+    const makeReq = mock.method(client, 'makeRequest', async () => QUERY_GET_RESPONSE);
+
+    await client.advancedSearchMetadata({
+      mailboxId: 'mb-parent',
+      excludeMailboxIds: ['mb-child-archive'],
+    });
+
+    const filter = makeReq.mock.calls[0].arguments[0].methodCalls[0][1].filter;
+    assert.deepEqual(filter, {
+      inMailbox: 'mb-parent',
+      inMailboxOtherThan: ['mb-child-archive'],
+    });
+  });
+
+  it('advancedSearch backwards-compat: legacy single-mailbox calls still produce flat filter', async () => {
+    // Pre-1.11 callers passing only mailboxId must continue to produce a flat
+    // FilterCondition shape.
+    const makeReq = mock.method(client, 'makeRequest', async () => QUERY_GET_RESPONSE);
+
+    await client.advancedSearch({ mailboxId: 'mb-only' });
+
+    const filter = makeReq.mock.calls[0].arguments[0].methodCalls[0][1].filter;
+    assert.deepEqual(filter, { inMailbox: 'mb-only' });
   });
 });
