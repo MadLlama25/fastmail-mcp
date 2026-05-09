@@ -795,7 +795,9 @@ export class JmapClient {
     const result = this.getMethodResult(response, 0);
 
     if (result.notUpdated && result.notUpdated[emailId]) {
-      throw new Error(`Failed to ${pinned ? 'pin' : 'unpin'} email.`);
+      const err = result.notUpdated[emailId];
+      const detail = err.description ? ` - ${err.description}` : '';
+      throw new Error(`Failed to ${pinned ? 'pin' : 'unpin'} email: ${err.type}${detail}`);
     }
   }
 
@@ -906,7 +908,9 @@ export class JmapClient {
     const result = this.getMethodResult(response, 0);
 
     if (result.notUpdated && result.notUpdated[emailId]) {
-      throw new Error('Failed to add labels to email.');
+      const err = result.notUpdated[emailId];
+      const detail = err.description ? ` - ${err.description}` : '';
+      throw new Error(`Failed to add labels to email: ${err.type}${detail}`);
     }
   }
 
@@ -935,7 +939,9 @@ export class JmapClient {
     const result = this.getMethodResult(response, 0);
 
     if (result.notUpdated && result.notUpdated[emailId]) {
-      throw new Error('Failed to remove labels from email.');
+      const err = result.notUpdated[emailId];
+      const detail = err.description ? ` - ${err.description}` : '';
+      throw new Error(`Failed to remove labels from email: ${err.type}${detail}`);
     }
   }
 
