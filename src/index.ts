@@ -742,7 +742,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             savePath: {
               type: 'string',
-              description: `File path to save the attachment to. Paths are restricted to ${getDownloadDir() || '~/Downloads/fastmail-mcp/'} (configurable via FASTMAIL_DOWNLOAD_DIR). Path traversal outside this directory is rejected for security. Parent directories will be created automatically.`,
+              description: `File path to save the attachment to. May be absolute or relative; relative paths resolve against ${getDownloadDir() || '~/Downloads/fastmail-mcp/'} (configurable via FASTMAIL_DOWNLOAD_DIR), so a bare filename lands there in one step. Absolute paths must fall within that directory; traversal or symlink escape outside it is rejected for security. To save directly into your own location, set FASTMAIL_DOWNLOAD_DIR to that root. Parent directories will be created automatically.`,
             },
           },
           required: ['emailId', 'attachmentId'],
@@ -1539,7 +1539,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               content: [
                 {
                   type: 'text',
-                  text: `Saved to: ${savePath} (${result.bytesWritten} bytes)`,
+                  text: `Saved to: ${result.savedPath} (${result.bytesWritten} bytes)`,
                 },
               ],
             };
