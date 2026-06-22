@@ -626,3 +626,49 @@ describe('ascending sort parameter', () => {
     });
   });
 });
+
+describe('getThread draft handling', () => {
+  let client: JmapClient;
+
+  beforeEach(() => {
+    client = makeClient();
+  });
+
+  // A thread containing a normal email plus an in-progress draft reply.
+  const stubThreadWithDraft = () => {
+    let callCount = 0;
+    return mock.method(client, 'makeRequest', async () => {
+      callCount++;
+      if (callCount === 1) {
+        return {
+          methodResponses: [
+            ['Email/get', { list: [{ threadId: 'thread-1' }] }, 'checkEmail'],
+          ],
+        };
+      }
+      return {
+        methodResponses: [
+          ['Thread/get', { list: [{ id: 'thread-1', emailIds: ['e1', 'e2'] }] }, 'getThread'],
+          ['Email/get', { list: [
+            { id: 'e1', subject: 'Sent message', keywords: { $seen: true } },
+            { id: 'e2', subject: 'Draft reply', keywords: { $draft: true } },
+          ] }, 'emails'],
+        ],
+      };
+    });
+  };
+
+  it('excludes draft messages by default', async () => {
+    stubThreadWithDraft();
+    const thread = await client.getThread('e1');
+    assert.equal(thread.length, 1);
+    assert.equal(thread[0].id, 'e1');
+  });
+
+  it('includes drafts when includeDrafts is true', async () => {
+    stubThreadWithDraft();
+    const thread = await client.getThread('e1', true);
+    assert.equal(thread.length, 2);
+    assert.deepEqual(thread.map((e: any) => e.id), ['e1', 'e2']);
+  });
+});
