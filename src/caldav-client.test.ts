@@ -21,8 +21,47 @@ import {
   insertBeforeEndVEvent,
   validateAttendeeEmail,
   quoteParamValue,
+  requireNonEmpty,
+  validateClearFields,
   CalDAVCalendarClient,
 } from './caldav-client.js';
+
+describe('requireNonEmpty', () => {
+  it('returns the trimmed value for a normal string', () => {
+    assert.equal(requireNonEmpty('  hello  ', 'title'), 'hello');
+  });
+
+  it('throws for empty, whitespace-only, null, and undefined, naming the field', () => {
+    assert.throws(() => requireNonEmpty('', 'title'), /title cannot be empty/);
+    assert.throws(() => requireNonEmpty('   ', 'title'), /title cannot be empty/);
+    assert.throws(() => requireNonEmpty(null, 'location'), /location cannot be empty; omit the field to leave it unchanged/);
+    assert.throws(() => requireNonEmpty(undefined, 'description'), /description cannot be empty/);
+  });
+});
+
+describe('validateClearFields', () => {
+  const allowed = new Set(['description', 'location']);
+
+  it('no-ops on empty or undefined input', () => {
+    assert.doesNotThrow(() => validateClearFields([], allowed, new Set()));
+    assert.doesNotThrow(() => validateClearFields(undefined, allowed, new Set()));
+  });
+
+  it('accepts an allowed field that is not also being set', () => {
+    assert.doesNotThrow(() => validateClearFields(['location'], allowed, new Set(['title'])));
+  });
+
+  it('rejects a field not in the allowed set, listing the allowed set', () => {
+    assert.throws(() => validateClearFields(['title'], allowed, new Set()), /description, location/);
+  });
+
+  it('rejects a field that is both set and cleared', () => {
+    assert.throws(
+      () => validateClearFields(['description'], allowed, new Set(['description'])),
+      /cannot both set and clear description/
+    );
+  });
+});
 
 describe('extractVEvent', () => {
   it('extracts VEVENT block from iCalendar data', () => {
@@ -1247,7 +1286,7 @@ describe('CalDAVCalendarClient.updateCalendarEvent (patch-based)', () => {
     assert.ok(updatedData.includes('DURATION:PT2H'));
   });
 
-  it('participants: [] removes all ATTENDEEs, preserves ORGANIZER', async () => {
+  it('participants: [] removes all ATTENDEEs and the now-orphaned ORGANIZER', async () => {
     const ical = makeRichIcal('evt5@fm');
     const objects = [{ data: ical, url: '/cal/evt5.ics' }];
     const { client, mockDAVClient } = createMockedPatchClient(objects);
@@ -1256,7 +1295,76 @@ describe('CalDAVCalendarClient.updateCalendarEvent (patch-based)', () => {
 
     const updatedData = mockDAVClient.updateCalendarObject.mock.calls[0].arguments[0].calendarObject.data;
     assert.ok(!updatedData.includes('ATTENDEE'));
-    assert.ok(updatedData.includes('ORGANIZER'));
+    // An ORGANIZER with no ATTENDEEs is a malformed scheduling VEVENT, so it is stripped too.
+    assert.ok(!updatedData.includes('ORGANIZER'));
+  });
+
+  it('rejects empty/whitespace/null title, description, location without writing', async () => {
+    for (const fields of [
+      { title: '' },
+      { title: '   ' },
+      { title: null as any },
+      { description: '' },
+      { description: '  ' },
+      { location: '' },
+    ]) {
+      const ical = makeRichIcal('evtA@fm');
+      const objects = [{ data: ical, url: '/cal/evtA.ics' }];
+      const { client, mockDAVClient } = createMockedPatchClient(objects);
+      await assert.rejects(() => client.updateCalendarEvent('evtA@fm', fields), /cannot be empty/);
+      assert.equal(mockDAVClient.updateCalendarObject.mock.calls.length, 0);
+    }
+  });
+
+  it('updating only participants preserves SUMMARY/DESCRIPTION/LOCATION', async () => {
+    const ical = makeRichIcal('evtB@fm');
+    const objects = [{ data: ical, url: '/cal/evtB.ics' }];
+    const { client, mockDAVClient } = createMockedPatchClient(objects);
+
+    await client.updateCalendarEvent('evtB@fm', { participants: [{ email: 'carol@example.com' }] });
+
+    const updatedData = mockDAVClient.updateCalendarObject.mock.calls[0].arguments[0].calendarObject.data;
+    assert.ok(updatedData.includes('SUMMARY:Original Title'));
+    assert.ok(updatedData.includes('DESCRIPTION:Original description'));
+    assert.ok(updatedData.includes('LOCATION:Room A'));
+  });
+
+  it('clearFields: ["location"] removes the LOCATION line', async () => {
+    const ical = makeRichIcal('evtC@fm');
+    const objects = [{ data: ical, url: '/cal/evtC.ics' }];
+    const { client, mockDAVClient } = createMockedPatchClient(objects);
+
+    await client.updateCalendarEvent('evtC@fm', { clearFields: ['location'] });
+
+    const updatedData = mockDAVClient.updateCalendarObject.mock.calls[0].arguments[0].calendarObject.data;
+    assert.ok(!updatedData.includes('LOCATION:'));
+    // Other content untouched
+    assert.ok(updatedData.includes('SUMMARY:Original Title'));
+    assert.ok(updatedData.includes('DESCRIPTION:Original description'));
+  });
+
+  it('clearFields rejects a non-clearable field (title) without writing', async () => {
+    const ical = makeRichIcal('evtD@fm');
+    const objects = [{ data: ical, url: '/cal/evtD.ics' }];
+    const { client, mockDAVClient } = createMockedPatchClient(objects);
+
+    await assert.rejects(
+      () => client.updateCalendarEvent('evtD@fm', { clearFields: ['title'] }),
+      /Cannot clear "title"/
+    );
+    assert.equal(mockDAVClient.updateCalendarObject.mock.calls.length, 0);
+  });
+
+  it('rejects setting and clearing the same field', async () => {
+    const ical = makeRichIcal('evtE@fm');
+    const objects = [{ data: ical, url: '/cal/evtE.ics' }];
+    const { client, mockDAVClient } = createMockedPatchClient(objects);
+
+    await assert.rejects(
+      () => client.updateCalendarEvent('evtE@fm', { description: 'x', clearFields: ['description'] }),
+      /cannot both set and clear description/
+    );
+    assert.equal(mockDAVClient.updateCalendarObject.mock.calls.length, 0);
   });
 
   it('floating end time preserves DTEND TZID', async () => {

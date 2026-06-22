@@ -565,7 +565,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'update_calendar_event',
-        description: 'Update an existing calendar event. Preserves all existing data (attendees, reminders, recurrence rules, etc.) not being changed. Floating times preserve the original timezone; explicit UTC/offset times convert to UTC. WARNING: providing participants replaces ALL existing attendee data (acceptance status, roles, etc.). participants: [] removes all attendees.',
+        description: 'Update an existing calendar event. Preserves all existing data (attendees, reminders, recurrence rules, etc.) not being changed. Omit a field to leave it unchanged; passing an empty/whitespace string for title, description, or location is rejected (use clearFields to delete description/location). Floating times preserve the original timezone; explicit UTC/offset times convert to UTC. WARNING: providing participants replaces ALL existing attendee data (acceptance status, roles, etc.). participants: [] removes all attendees.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -604,6 +604,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                 required: ['email'],
               },
               description: 'Replaces ALL existing attendees. Empty array removes all attendees. Omit to preserve existing attendees.',
+            },
+            clearFields: {
+              type: 'array',
+              items: { type: 'string', enum: ['description', 'location'] },
+              description: 'Property names to delete from the event. Allowed: description, location. Cannot also pass the same field as a value.',
             },
             confirmRecurring: {
               type: 'boolean',
@@ -1408,18 +1413,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'update_calendar_event': {
-        const { eventId, title, description, start, end, location, participants, confirmRecurring } = args as any;
+        const { eventId, title, description, start, end, location, participants, clearFields, confirmRecurring } = args as any;
         if (!eventId) {
           throw new McpError(ErrorCode.InvalidParams, 'eventId is required');
         }
-        if (title === undefined && description === undefined && start === undefined && end === undefined && location === undefined && participants === undefined) {
-          throw new McpError(ErrorCode.InvalidParams, 'At least one field to update must be provided (title, description, start, end, location, or participants)');
+        const hasClearFields = Array.isArray(clearFields) && clearFields.length > 0;
+        if (title === undefined && description === undefined && start === undefined && end === undefined && location === undefined && participants === undefined && !hasClearFields) {
+          throw new McpError(ErrorCode.InvalidParams, 'At least one field to update must be provided (title, description, start, end, location, participants, or clearFields)');
         }
         const davClient = initializeCalDAVClient();
         if (!davClient) {
           throw new McpError(ErrorCode.InvalidRequest, 'CalDAV not configured. Set FASTMAIL_CALDAV_USERNAME and FASTMAIL_CALDAV_PASSWORD.');
         }
-        const fields = { title, description, start, end, location, participants, confirmRecurring };
+        const fields = { title, description, start, end, location, participants, clearFields, confirmRecurring };
         await davClient.updateCalendarEvent(eventId, fields);
         return { content: [{ type: 'text', text: `Calendar event updated. Event ID: ${eventId}` }] };
       }
