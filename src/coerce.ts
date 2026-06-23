@@ -30,6 +30,21 @@ export function coerceStringArray(value: unknown): string[] | undefined {
   return trimmed.split(',').map(s => s.trim()).filter(Boolean);
 }
 
+// Coerce the four recipient list fields from whatever shape a (possibly lenient)
+// client sent into string[] | undefined, so the JMAP client's .map(parseAddress)
+// calls never receive a bare string (issue #54). Pass the raw tool args; reads
+// only to/cc/bcc/replyTo and returns the coerced quartet.
+export function coerceRecipients(args: { to?: unknown; cc?: unknown; bcc?: unknown; replyTo?: unknown }): {
+  to?: string[]; cc?: string[]; bcc?: string[]; replyTo?: string[];
+} {
+  return {
+    to: coerceStringArray(args.to),
+    cc: coerceStringArray(args.cc),
+    bcc: coerceStringArray(args.bcc),
+    replyTo: coerceStringArray(args.replyTo),
+  };
+}
+
 export function coerceBool(value: unknown): boolean | undefined {
   if (typeof value === 'boolean') return value;
   if (value === 'true') return true;
