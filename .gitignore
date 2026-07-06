@@ -1,5 +1,6 @@
 node_modules/
 dist/
+bun.lock
 *.log
 .env
 .env.local
