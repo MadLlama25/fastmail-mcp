@@ -335,9 +335,14 @@ export function replaceICalProperty(icalData: string, key: string, newLine: stri
     const newLines = newLine !== null ? newLine.split(/\r?\n/) : [];
     lines.splice(foundIdx, foundEndIdx - foundIdx, ...newLines);
   } else if (newLine !== null) {
-    // Insert before END:VEVENT
+    // Insert before the first sub-component (e.g. VALARM) when present —
+    // RFC 5545 ABNF is `eventprop *alarmc`, so properties must precede alarms.
+    let insertAt = veventEnd;
+    for (let i = veventStart + 1; i < veventEnd; i++) {
+      if (lines[i].trim().startsWith('BEGIN:')) { insertAt = i; break; }
+    }
     const newLines = newLine.split(/\r?\n/);
-    lines.splice(veventEnd, 0, ...newLines);
+    lines.splice(insertAt, 0, ...newLines);
   }
 
   return lines.join(lineEnding);
@@ -478,13 +483,15 @@ export function removeOrphanedVTimezones(icalData: string): string {
     if (lines[i].trim() === 'END:VTIMEZONE') { inTz = false; continue; }
     if (!inTz) nonTzLines.push(lines[i]);
   }
-  const nonTzContent = nonTzLines.join('\n');
+  // Unfold before scanning so a reference split across a folded line isn't
+  // missed, and check both bare and quoted parameter forms.
+  const nonTzContent = nonTzLines.join('\n').replace(/\n[ \t]/g, '');
 
   // Check each VTIMEZONE for references
   const orphaned = tzBlocks.filter(tz => {
     if (!tz.tzid) return false;
-    // Check for ;TZID=<tzid> references in any property
-    return !nonTzContent.includes(`;TZID=${tz.tzid}`);
+    return !nonTzContent.includes(`;TZID=${tz.tzid}`) &&
+           !nonTzContent.includes(`;TZID="${tz.tzid}"`);
   });
 
   // Remove orphaned blocks in reverse order
@@ -535,8 +542,9 @@ export function removeExceptionVEvents(icalData: string, orphanedRecurrenceIds: 
     if (!block.recurrenceId) return false; // master VEVENT — never remove
     const recIdFormatted = formatICalDate(block.recurrenceId);
     if (!recIdFormatted) return false;
-    // Compare as UTC ISO string — handles both date-only and datetime
-    const recDate = new Date(recIdFormatted);
+    // Compare in a fixed UTC frame — naive datetimes must not be interpreted
+    // in the process's local timezone (must match orphan-detection's frame).
+    const recDate = parseICalDateAsUTC(recIdFormatted);
     const recDateStr = recDate.toISOString().replace(/\.\d{3}Z$/, 'Z');
     return orphanedDateStrings.includes(recDateStr);
   });
@@ -701,10 +709,17 @@ export function unescapeICalText(value: string): string {
  */
 export function escapeICalText(value: string): string {
   return value
+    // Normalize CRLF and BARE CR to LF first — a lone \r would otherwise pass
+    // through untouched and act as a line terminator for downstream parsers,
+    // reopening the property-injection class the date paths are guarded against.
+    .replace(/\r\n?/g, '\n')
+    // Strip remaining control characters (HTAB is legal in iCal TEXT; LF is
+    // escaped below).
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
     .replace(/\\/g, '\\\\')
     .replace(/;/g, '\\;')
     .replace(/,/g, '\\,')
-    .replace(/\r?\n/g, '\\n');
+    .replace(/\n/g, '\\n');
 }
 
 /**
@@ -857,7 +872,7 @@ function formatDateTimeProperty(
     if (originalVevent) {
       const rawLines = parseAllICalProperties(originalVevent, propName);
       if (rawLines.length > 0) {
-        const tzMatch = rawLines[0].match(/;TZID=([^;:]+)/);
+        const tzMatch = rawLines[0].match(/;TZID=("[^"]*"|[^;:]+)/);
         if (tzMatch) {
           return { line: foldICalLine(`${propName};TZID=${tzMatch[1]}:${icalTime}`, lineEnding), isDateOnly: false };
         }
@@ -866,7 +881,7 @@ function formatDateTimeProperty(
       if (propName === 'DTEND') {
         const startLines = parseAllICalProperties(originalVevent, 'DTSTART');
         if (startLines.length > 0) {
-          const tzMatch = startLines[0].match(/;TZID=([^;:]+)/);
+          const tzMatch = startLines[0].match(/;TZID=("[^"]*"|[^;:]+)/);
           if (tzMatch) {
             return { line: foldICalLine(`${propName};TZID=${tzMatch[1]}:${icalTime}`, lineEnding), isDateOnly: false };
           }
@@ -918,6 +933,43 @@ function nextDay(dateStr: string): string {
   const d = new Date(dateStr);
   d.setUTCDate(d.getUTCDate() + 1);
   return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Parse an ISO-ish date/datetime string in a fixed UTC frame.
+ * Naive datetimes ("2026-03-20T09:30:00") are interpreted as UTC — matching
+ * rrule's naive-as-UTC convention — instead of the process's local timezone,
+ * which `new Date(...)` would use. Without this, orphaned-exception detection
+ * compares RECURRENCE-IDs and RRULE occurrences in two different timezone
+ * frames whenever TZ != UTC, flagging valid exceptions as orphans.
+ */
+export function parseICalDateAsUTC(iso: string): Date {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) return new Date(iso + 'T00:00:00Z');
+  if (/Z$|[+-]\d{2}:?\d{2}$/.test(iso)) return new Date(iso);
+  return new Date(iso + 'Z');
+}
+
+/**
+ * Reorder VEVENT blocks so the master (no RECURRENCE-ID) comes first.
+ * RFC 5545/4791 do not guarantee component ordering — a resource authored by
+ * a third-party client may list an overridden instance before the master.
+ * All in-place patch helpers target the first VEVENT, so without this
+ * normalization an exception-first payload would have its exception patched
+ * (and the recurring-event guard skipped) instead of the master.
+ */
+export function normalizeMasterVEventFirst(icalData: string): string {
+  const vevents = icalData.match(/BEGIN:VEVENT[\s\S]*?END:VEVENT/g) || [];
+  if (vevents.length < 2) return icalData;
+  const first = vevents[0];
+  if (!first || !/^RECURRENCE-ID[;:]/m.test(first)) return icalData;
+  const master = vevents.find(v => !/^RECURRENCE-ID[;:]/m.test(v));
+  if (!master) return icalData;
+  // Swap the two blocks. Function replacements avoid `$`-pattern expansion.
+  const SENTINEL = '\u0000MASTER-VEVENT\u0000';
+  let out = icalData.replace(master, () => SENTINEL);
+  out = out.replace(first, () => master);
+  out = out.replace(SENTINEL, () => first);
+  return out;
 }
 
 export class CalDAVCalendarClient {
@@ -1164,14 +1216,18 @@ export class CalDAVCalendarClient {
     const lineEnding = detectLineEnding(obj.data);
     const fold = (line: string) => foldICalLine(line, lineEnding);
 
+    // All patch helpers target the FIRST VEVENT — make sure that's the master,
+    // not an overridden instance (component order is not guaranteed by RFC).
+    const normalizedData = normalizeMasterVEventFirst(obj.data);
+
     // Capture original VEVENT before any patching for reads
-    const originalVevent = extractVEvent(obj.data);
+    const originalVevent = extractVEvent(normalizedData);
     if (!originalVevent) {
       throw new Error('Cannot update event: no VEVENT block found');
     }
 
     const existingUid = parseICalValue(originalVevent, 'UID') || eventId;
-    let data = obj.data;
+    let data = normalizedData;
 
     // --- Recurring event guard ---
     const hasRRule = /^RRULE[;:]/m.test(originalVevent);
@@ -1207,7 +1263,10 @@ export class CalDAVCalendarClient {
               if (!recIdRaw) continue;
               const recIdFormatted = formatICalDate(recIdRaw);
               if (!recIdFormatted) continue;
-              const recDate = new Date(recIdFormatted);
+              // Parse naive datetimes as UTC to match rrule's naive-as-UTC
+              // convention — new Date() would use the process's local TZ and
+              // flag every valid exception as an orphan when TZ != UTC.
+              const recDate = parseICalDateAsUTC(recIdFormatted);
               // Check if this recurrence-id still matches an occurrence
               const matches = rule.between(
                 new Date(recDate.getTime() - 1000),

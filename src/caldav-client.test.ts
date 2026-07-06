@@ -12,6 +12,8 @@ import {
   escapeICalText,
   unescapeICalText,
   validateAndFormatICalDate,
+  parseICalDateAsUTC,
+  normalizeMasterVEventFirst,
   toICalUTC,
   foldICalLine,
   detectLineEnding,
@@ -2146,5 +2148,140 @@ describe('Recurring event: no orphans proceeds without confirmRecurring', () => 
     const updatedData = mockDAVClient.updateCalendarObject.mock.calls[0].arguments[0].calendarObject.data;
     assert.ok(updatedData.includes('Modified Week 2')); // Exception preserved
     assert.ok(updatedData.includes('DTEND:20260406T120000Z')); // End updated
+  });
+});
+
+// ---------- v1.11.0 review fixes ----------
+
+describe('escapeICalText control-character hardening', () => {
+  it('escapes a bare CR as \\n instead of passing it through', () => {
+    assert.equal(escapeICalText('Standup\rATTENDEE:mailto:x@example.com'),
+      'Standup\\nATTENDEE:mailto:x@example.com');
+  });
+
+  it('still escapes CRLF and LF as \\n', () => {
+    assert.equal(escapeICalText('a\r\nb\nc'), 'a\\nb\\nc');
+  });
+
+  it('strips other control characters', () => {
+    assert.equal(escapeICalText('a\x00b\x08c\x7Fd'), 'abcd');
+  });
+
+  it('keeps horizontal tabs (legal in iCal TEXT)', () => {
+    assert.equal(escapeICalText('a\tb'), 'a\tb');
+  });
+});
+
+describe('parseICalDateAsUTC', () => {
+  it('interprets naive datetimes as UTC regardless of process TZ', () => {
+    const d = parseICalDateAsUTC('2026-03-20T09:30:00');
+    assert.equal(d.getTime(), Date.UTC(2026, 2, 20, 9, 30, 0));
+  });
+
+  it('handles explicit Z', () => {
+    assert.equal(parseICalDateAsUTC('2026-03-20T09:30:00Z').getTime(), Date.UTC(2026, 2, 20, 9, 30, 0));
+  });
+
+  it('handles offsets', () => {
+    assert.equal(parseICalDateAsUTC('2026-03-20T10:30:00+01:00').getTime(), Date.UTC(2026, 2, 20, 9, 30, 0));
+  });
+
+  it('handles date-only as UTC midnight', () => {
+    assert.equal(parseICalDateAsUTC('2026-03-20').getTime(), Date.UTC(2026, 2, 20));
+  });
+});
+
+describe('normalizeMasterVEventFirst', () => {
+  const exception = 'BEGIN:VEVENT\nUID:u1\nRECURRENCE-ID:20260327T093000Z\nDTSTART:20260327T110000Z\nSUMMARY:Moved instance\nEND:VEVENT';
+  const master = 'BEGIN:VEVENT\nUID:u1\nDTSTART:20260320T093000Z\nRRULE:FREQ=WEEKLY\nSUMMARY:Weekly\nEND:VEVENT';
+
+  it('moves the master VEVENT ahead of an exception-first ordering', () => {
+    const data = `BEGIN:VCALENDAR\n${exception}\n${master}\nEND:VCALENDAR`;
+    const out = normalizeMasterVEventFirst(data);
+    const firstVevent = out.match(/BEGIN:VEVENT[\s\S]*?END:VEVENT/)?.[0] || '';
+    assert.ok(/^RRULE/m.test(firstVevent), 'master (RRULE, no RECURRENCE-ID) should now be first');
+    assert.ok(out.includes('Moved instance'), 'exception must be preserved');
+  });
+
+  it('leaves master-first payloads untouched', () => {
+    const data = `BEGIN:VCALENDAR\n${master}\n${exception}\nEND:VCALENDAR`;
+    assert.equal(normalizeMasterVEventFirst(data), data);
+  });
+
+  it('leaves single-VEVENT payloads untouched', () => {
+    const data = `BEGIN:VCALENDAR\n${master}\nEND:VCALENDAR`;
+    assert.equal(normalizeMasterVEventFirst(data), data);
+  });
+});
+
+describe('replaceICalProperty insert position with VALARM', () => {
+  it('inserts a new property before the first sub-component, not after it', () => {
+    const data = [
+      'BEGIN:VCALENDAR',
+      'BEGIN:VEVENT',
+      'UID:u1',
+      'DTSTART:20260320T093000Z',
+      'BEGIN:VALARM',
+      'TRIGGER:-PT15M',
+      'END:VALARM',
+      'END:VEVENT',
+      'END:VCALENDAR',
+    ].join('\n');
+    const out = replaceICalProperty(data, 'DESCRIPTION', 'DESCRIPTION:hello');
+    const descIdx = out.indexOf('DESCRIPTION:hello');
+    const alarmIdx = out.indexOf('BEGIN:VALARM');
+    assert.ok(descIdx !== -1 && alarmIdx !== -1);
+    assert.ok(descIdx < alarmIdx, 'property must precede VALARM per RFC 5545 ABNF');
+  });
+});
+
+describe('removeOrphanedVTimezones quoted/folded references', () => {
+  it('keeps a VTIMEZONE referenced via a quoted TZID parameter', () => {
+    const data = [
+      'BEGIN:VCALENDAR',
+      'BEGIN:VTIMEZONE',
+      'TZID:Custom/Zone',
+      'END:VTIMEZONE',
+      'BEGIN:VEVENT',
+      'UID:u1',
+      'DTSTART;TZID="Custom/Zone":20260320T093000',
+      'END:VEVENT',
+      'END:VCALENDAR',
+    ].join('\n');
+    const out = removeOrphanedVTimezones(data);
+    assert.ok(out.includes('BEGIN:VTIMEZONE'), 'referenced VTIMEZONE must not be removed');
+  });
+
+  it('keeps a VTIMEZONE whose reference is split across a folded line', () => {
+    const data = [
+      'BEGIN:VCALENDAR',
+      'BEGIN:VTIMEZONE',
+      'TZID:America/Argentina/ComodRivadavia',
+      'END:VTIMEZONE',
+      'BEGIN:VEVENT',
+      'UID:u1',
+      'DTSTART;TZID=America/Argentina/Comod',
+      ' Rivadavia:20260320T093000',
+      'END:VEVENT',
+      'END:VCALENDAR',
+    ].join('\n');
+    const out = removeOrphanedVTimezones(data);
+    assert.ok(out.includes('BEGIN:VTIMEZONE'), 'folded reference must still count');
+  });
+
+  it('still removes a genuinely orphaned VTIMEZONE', () => {
+    const data = [
+      'BEGIN:VCALENDAR',
+      'BEGIN:VTIMEZONE',
+      'TZID:Unused/Zone',
+      'END:VTIMEZONE',
+      'BEGIN:VEVENT',
+      'UID:u1',
+      'DTSTART:20260320T093000Z',
+      'END:VEVENT',
+      'END:VCALENDAR',
+    ].join('\n');
+    const out = removeOrphanedVTimezones(data);
+    assert.ok(!out.includes('BEGIN:VTIMEZONE'));
   });
 });
