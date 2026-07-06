@@ -227,15 +227,19 @@ export class ContactsCalendarClient extends JmapClient {
 
     const session = await this.getSession();
 
-    const eventObject = {
+    const eventObject: Record<string, unknown> = {
       calendarId: event.calendarId,
       title: event.title,
       description: event.description || '',
       start: event.start,
       end: event.end,
       location: event.location || '',
-      participants: event.participants || []
     };
+    // TODO: participants should be an RFC 8984 object/map, not an array.
+    // TODO: startDate/endDate not passed through to JMAP.
+    if (event.participants?.length) {
+      eventObject.participants = event.participants;
+    }
 
     const request: JmapRequest = {
       using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:calendars'],
