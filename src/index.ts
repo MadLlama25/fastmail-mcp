@@ -701,7 +701,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'get_recent_emails',
-        description: 'Get the most recent emails from inbox (like top-ten)',
+        description: 'Get the most recent emails across all mailboxes except Trash and Spam (pass mailboxName to scope to one folder, e.g. "inbox")',
         inputSchema: {
           type: 'object',
           properties: {
@@ -712,8 +712,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             mailboxName: {
               type: 'string',
-              description: 'Mailbox to search (default: inbox)',
-              default: 'inbox',
+              description: 'Mailbox to search (optional; when omitted, all mailboxes except Trash and Spam are searched)',
             },
             ascending: {
               type: 'boolean',
@@ -1712,7 +1711,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'get_recent_emails': {
-        const { limit = 10, mailboxName = 'inbox', ascending } = args as any;
+        const { limit = 10, mailboxName = null, ascending } = args as any;
         const client = initializeClient();
         const emails = await client.getRecentEmails(limit, mailboxName, !!ascending);
         return {

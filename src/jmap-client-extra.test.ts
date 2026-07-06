@@ -116,6 +116,56 @@ describe('getRecentEmails', () => {
     const emails = await client.getRecentEmails(5, 'inbox');
     assert.deepEqual(emails, []);
   });
+
+  it('defaults to all mailboxes except Trash and Spam when no mailbox is given', async () => {
+    stubMailboxes(client, [
+      INBOX_MAILBOX,
+      SENT_MAILBOX,
+      TRASH_MAILBOX,
+      { id: 'mb-junk', name: 'Spam', role: 'junk' },
+    ]);
+    const makeReq = mock.method(client, 'makeRequest', async () => ({
+      methodResponses: [
+        ['Email/query', { ids: [] }, 'query'],
+        ['Email/get', { list: [] }, 'emails'],
+      ],
+    }));
+
+    await client.getRecentEmails(10);
+
+    const filter = makeReq.mock.calls[0].arguments[0].methodCalls[0][1].filter;
+    assert.deepEqual(filter, { inMailboxOtherThan: ['mb-trash', 'mb-junk'] });
+  });
+
+  it('uses an unfiltered query when no Trash/Spam mailboxes exist', async () => {
+    stubMailboxes(client, [INBOX_MAILBOX, SENT_MAILBOX]);
+    const makeReq = mock.method(client, 'makeRequest', async () => ({
+      methodResponses: [
+        ['Email/query', { ids: [] }, 'query'],
+        ['Email/get', { list: [] }, 'emails'],
+      ],
+    }));
+
+    await client.getRecentEmails(10);
+
+    const filter = makeReq.mock.calls[0].arguments[0].methodCalls[0][1].filter;
+    assert.deepEqual(filter, {});
+  });
+
+  it('still scopes to a single mailbox when one is named', async () => {
+    stubMailboxes(client);
+    const makeReq = mock.method(client, 'makeRequest', async () => ({
+      methodResponses: [
+        ['Email/query', { ids: [] }, 'query'],
+        ['Email/get', { list: [] }, 'emails'],
+      ],
+    }));
+
+    await client.getRecentEmails(10, 'sent');
+
+    const filter = makeReq.mock.calls[0].arguments[0].methodCalls[0][1].filter;
+    assert.deepEqual(filter, { inMailbox: 'mb-sent' });
+  });
 });
 
 // ---------- getEmails ----------

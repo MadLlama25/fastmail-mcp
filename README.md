@@ -163,8 +163,9 @@ You can install this server as a Desktop Extension for Claude Desktop using the 
 - **search_emails**: Search emails by content
   - Parameters: `query` (required), `limit` (default: 20), `ascending` (optional, oldest first), `excludeDrafts` (optional, omit draft messages)
   - Drafts are **included by default**. Set `excludeDrafts: true` to filter them out server-side.
-- **get_recent_emails**: Get the most recent emails from a mailbox (inspired by JMAP-Samples top-ten)
-  - Parameters: `limit` (default: 10, max: 50), `mailboxName` (default: 'inbox'), `ascending` (optional, oldest first)
+- **get_recent_emails**: Get the most recent emails (inspired by JMAP-Samples top-ten)
+  - Parameters: `limit` (default: 10, max: 50), `mailboxName` (optional), `ascending` (optional, oldest first)
+  - When `mailboxName` is omitted, all mailboxes are searched **except Trash and Spam**. Pass a mailbox name (e.g. `'inbox'`, `'sent'`) to scope to one folder.
 - **mark_email_read**: Mark an email as read or unread
   - Parameters: `emailId` (required), `read` (default: true)
 - **delete_email**: Delete an email (move to trash)
