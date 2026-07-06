@@ -649,6 +649,32 @@ describe('searchEmails', () => {
       },
     );
   });
+
+  it('excludeDrafts adds notKeyword $draft to the server-side filter', async () => {
+    const makeReq = mock.method(client, 'makeRequest', async () => ({
+      methodResponses: [
+        ['Email/query', { ids: [] }, 'query'],
+        ['Email/get', { list: [] }, 'emails'],
+      ],
+    }));
+    await client.searchEmails('quarterly', 10, false, true);
+    const filter = makeReq.mock.calls[0].arguments[0].methodCalls[0][1].filter;
+    assert.equal(filter.text, 'quarterly');
+    assert.equal(filter.notKeyword, '$draft');
+  });
+
+  it('includes drafts by default (no notKeyword in the filter)', async () => {
+    const makeReq = mock.method(client, 'makeRequest', async () => ({
+      methodResponses: [
+        ['Email/query', { ids: [] }, 'query'],
+        ['Email/get', { list: [] }, 'emails'],
+      ],
+    }));
+    await client.searchEmails('quarterly', 10);
+    const filter = makeReq.mock.calls[0].arguments[0].methodCalls[0][1].filter;
+    assert.equal(filter.text, 'quarterly');
+    assert.equal(filter.notKeyword, undefined);
+  });
 });
 
 // ---------- validateSavePath tests ----------

@@ -503,7 +503,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: 'search_emails',
         description:
-          'Full-text search of email body and subject. Does not filter by sender, recipient, or date — use advanced_search for field-specific filtering.',
+          'Full-text search of email body and subject. Does not filter by sender, recipient, or date — use advanced_search for field-specific filtering. Drafts are included by default; set excludeDrafts=true to omit draft messages from results.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -519,6 +519,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             ascending: {
               type: 'boolean',
               description: 'Sort oldest first instead of newest first (default: false)',
+            },
+            excludeDrafts: {
+              type: 'boolean',
+              description: 'Omit draft messages from results (default: false, drafts included). Filtered server-side via the $draft keyword.',
             },
           },
           required: ['query'],
@@ -1018,13 +1022,17 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'get_thread',
-        description: 'Get all emails in a conversation thread',
+        description: 'Get all emails in a conversation thread. Draft messages are excluded by default; set includeDrafts=true to include in-progress drafts in the thread.',
         inputSchema: {
           type: 'object',
           properties: {
             threadId: {
               type: 'string',
               description: 'ID of the thread/conversation',
+            },
+            includeDrafts: {
+              type: 'boolean',
+              description: 'Include draft messages in the thread (default: false, drafts excluded).',
             },
           },
           required: ['threadId'],
@@ -1534,12 +1542,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'search_emails': {
-        const { query, limit, ascending } = args as any;
+        const { query, limit, ascending, excludeDrafts } = args as any;
         if (!query) {
           throw new McpError(ErrorCode.InvalidParams, 'query is required');
         }
         const validLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
-        const emails = await client.searchEmails(query, validLimit, !!ascending);
+        const emails = await client.searchEmails(query, validLimit, !!ascending, coerceBool(excludeDrafts) ?? false);
         return {
           content: [
             {
@@ -1935,13 +1943,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'get_thread': {
-        const { threadId } = args as any;
+        const { threadId, includeDrafts } = args as any;
         if (!threadId) {
           throw new McpError(ErrorCode.InvalidParams, 'threadId is required');
         }
         const client = initializeClient();
         try {
-          const thread = await client.getThread(threadId);
+          const thread = await client.getThread(threadId, coerceBool(includeDrafts) ?? false);
           return {
             content: [
               {
