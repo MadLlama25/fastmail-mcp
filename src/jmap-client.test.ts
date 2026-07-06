@@ -373,6 +373,76 @@ describe('updateDraft', () => {
       },
     );
   });
+
+  // Body-extraction correctness (the `|| true` bug). Fixtures mirror real server shapes:
+  // a single-format draft aliases its one part into BOTH the textBody and htmlBody lists;
+  // a dual-format draft has two distinct typed parts. Assertions are on the recreate
+  // OUTPUT, whose bodyValues are re-keyed to 'text'/'html'.
+
+  it('preserves a single text-only body without synthesising a phantom html part', async () => {
+    const aliasedDraft = {
+      ...EXISTING_DRAFT,
+      textBody: [{ partId: '1', type: 'text/plain' }],
+      htmlBody: [{ partId: '1', type: 'text/plain' }], // server aliases the one part into both lists
+      bodyValues: { '1': { value: 'Plain only' } },
+    };
+    const makeReq = mock.method(client, 'makeRequest', async (req: any) => {
+      if (req.methodCalls[0][0] === 'Email/get') {
+        return { methodResponses: [['Email/get', { list: [aliasedDraft] }, 'getEmail']] };
+      }
+      return { methodResponses: [['Email/set', { created: { draft: { id: 'draft-2' } }, destroyed: ['draft-1'] }, 'updateDraft']] };
+    });
+
+    await client.updateDraft('draft-1', { subject: 'New subject' });
+
+    const emailObj = makeReq.mock.calls[1].arguments[0].methodCalls[0][1].create.draft;
+    assert.equal(emailObj.htmlBody, undefined);
+    assert.deepEqual(emailObj.bodyValues, { text: { value: 'Plain only' } });
+  });
+
+  it('preserves both bodies from their own parts on a subject-only edit', async () => {
+    const dualDraft = {
+      ...EXISTING_DRAFT,
+      textBody: [{ partId: '1', type: 'text/plain' }],
+      htmlBody: [{ partId: '2', type: 'text/html' }],
+      bodyValues: { '1': { value: 'The text' }, '2': { value: '<p>The html</p>' } },
+    };
+    const makeReq = mock.method(client, 'makeRequest', async (req: any) => {
+      if (req.methodCalls[0][0] === 'Email/get') {
+        return { methodResponses: [['Email/get', { list: [dualDraft] }, 'getEmail']] };
+      }
+      return { methodResponses: [['Email/set', { created: { draft: { id: 'draft-2' } }, destroyed: ['draft-1'] }, 'updateDraft']] };
+    });
+
+    await client.updateDraft('draft-1', { subject: 'New subject' });
+
+    const emailObj = makeReq.mock.calls[1].arguments[0].methodCalls[0][1].create.draft;
+    assert.deepEqual(emailObj.bodyValues, {
+      text: { value: 'The text' },
+      html: { value: '<p>The html</p>' },
+    });
+  });
+
+  it('updates only textBody and preserves the existing htmlBody', async () => {
+    const dualDraft = {
+      ...EXISTING_DRAFT,
+      textBody: [{ partId: '1', type: 'text/plain' }],
+      htmlBody: [{ partId: '2', type: 'text/html' }],
+      bodyValues: { '1': { value: 'The text' }, '2': { value: '<p>The html</p>' } },
+    };
+    const makeReq = mock.method(client, 'makeRequest', async (req: any) => {
+      if (req.methodCalls[0][0] === 'Email/get') {
+        return { methodResponses: [['Email/get', { list: [dualDraft] }, 'getEmail']] };
+      }
+      return { methodResponses: [['Email/set', { created: { draft: { id: 'draft-2' } }, destroyed: ['draft-1'] }, 'updateDraft']] };
+    });
+
+    await client.updateDraft('draft-1', { textBody: 'NEW text' });
+
+    const emailObj = makeReq.mock.calls[1].arguments[0].methodCalls[0][1].create.draft;
+    assert.equal(emailObj.bodyValues.text.value, 'NEW text');
+    assert.equal(emailObj.bodyValues.html.value, '<p>The html</p>');
+  });
 });
 
 // ---------- sendDraft ----------
