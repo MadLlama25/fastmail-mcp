@@ -957,7 +957,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'check_function_availability',
-        description: 'Check which MCP functions are available based on account permissions',
+        description: 'Check which MCP functions are available based on account permissions. Calendar tools run over CalDAV, so calendar is reported available when CalDAV credentials are configured, regardless of the JMAP calendar capability.',
         inputSchema: {
           type: 'object',
           properties: {},
@@ -1749,7 +1749,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'check_function_availability': {
         const client = initializeClient();
         const session = await client.getSession();
-        
+
+        // Calendar tools run on CalDAV, not JMAP. So calendar is available if
+        // EITHER the JMAP calendar capability is present OR CalDAV credentials
+        // are configured (FASTMAIL_CALDAV_USERNAME / FASTMAIL_CALDAV_PASSWORD).
+        const jmapCalendar = !!session.capabilities['urn:ietf:params:jmap:calendars'];
+        const caldavConfigured = initializeCalDAVClient() !== null;
+        const calendarAvailable = jmapCalendar || caldavConfigured;
+        const calendarNote = jmapCalendar
+          ? 'Calendar is available (JMAP)'
+          : caldavConfigured
+            ? 'Calendar is available via CalDAV'
+            : 'Calendar access not available - set FASTMAIL_CALDAV_USERNAME and FASTMAIL_CALDAV_PASSWORD, or enable calendar scope in Fastmail account settings';
+
         const availability = {
           email: {
             available: true,
@@ -1782,14 +1794,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             }
           },
           calendar: {
-            available: !!session.capabilities['urn:ietf:params:jmap:calendars'],
+            available: calendarAvailable,
             functions: ['list_calendars', 'list_calendar_events', 'get_calendar_event', 'create_calendar_event'],
-            note: session.capabilities['urn:ietf:params:jmap:calendars'] ? 
-              'Calendar is available' : 
-              'Calendar access not available - may require enabling in Fastmail account settings',
-            enablementGuide: session.capabilities['urn:ietf:params:jmap:calendars'] ? null : {
+            note: calendarNote,
+            enablementGuide: calendarAvailable ? null : {
               steps: [
-                '1. Log into Fastmail web interface',
+                'Option A (CalDAV): set FASTMAIL_CALDAV_USERNAME and FASTMAIL_CALDAV_PASSWORD (app password) — calendar tools run over CalDAV',
+                'Option B (JMAP scope): 1. Log into Fastmail web interface',
                 '2. Go to Settings → Privacy & Security → Connected Apps & API tokens',
                 '3. Check if calendar scope is enabled for your API token',
                 '4. If not available, you may need to upgrade your Fastmail plan or contact support'

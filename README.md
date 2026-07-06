@@ -225,7 +225,7 @@ You can install this server as a Desktop Extension for Claude Desktop using the 
 ### Identity & Testing Tools
 
 - **list_identities**: List sending identities (email addresses that can be used for sending)
-- **check_function_availability**: Check which functions are available based on account permissions (includes setup guidance)
+- **check_function_availability**: Check which functions are available based on account permissions (includes setup guidance). Calendar tools run over CalDAV, so calendar is reported available when CalDAV credentials are configured, regardless of the JMAP calendar capability.
 - **test_bulk_operations**: Safely test bulk operations with dry-run mode
   - Parameters: `dryRun` (default: true), `limit` (default: 3)
 
