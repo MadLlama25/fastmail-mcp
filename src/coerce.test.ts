@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { coerceStringArray, coerceBool, redactBearerTokens } from './coerce.js';
+import { coerceStringArray, coerceRecipients, coerceBool, redactBearerTokens } from './coerce.js';
 
 describe('coerceStringArray', () => {
   it('returns undefined for undefined input', () => {
@@ -51,6 +51,50 @@ describe('coerceStringArray', () => {
 
   it('falls back to comma-split when JSON parsing fails', () => {
     assert.deepEqual(coerceStringArray('[not valid json]'), ['[not valid json]']);
+  });
+});
+
+describe('coerceRecipients', () => {
+  it('coerces all four fields from arrays, JSON-strings, comma-strings, and bare strings', () => {
+    const result = coerceRecipients({
+      to: ['a@b.com'],
+      cc: '["c@d.com", "e@f.com"]',
+      bcc: 'g@h.com, i@j.com',
+      replyTo: 'k@l.com',
+    });
+    assert.deepEqual(result, {
+      to: ['a@b.com'],
+      cc: ['c@d.com', 'e@f.com'],
+      bcc: ['g@h.com', 'i@j.com'],
+      replyTo: ['k@l.com'],
+    });
+  });
+
+  it('coerces empty string to empty array for each field', () => {
+    assert.deepEqual(coerceRecipients({ to: '', cc: '', bcc: '', replyTo: '' }), {
+      to: [],
+      cc: [],
+      bcc: [],
+      replyTo: [],
+    });
+  });
+
+  it('returns undefined for omitted fields', () => {
+    assert.deepEqual(coerceRecipients({}), {
+      to: undefined,
+      cc: undefined,
+      bcc: undefined,
+      replyTo: undefined,
+    });
+  });
+
+  it('returns undefined for non-string, non-array values', () => {
+    assert.deepEqual(coerceRecipients({ to: 123, cc: {}, bcc: true, replyTo: null } as any), {
+      to: undefined,
+      cc: undefined,
+      bcc: undefined,
+      replyTo: undefined,
+    });
   });
 });
 

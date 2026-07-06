@@ -11,7 +11,7 @@ import { FastmailAuth, FastmailConfig } from './auth.js';
 import { JmapClient } from './jmap-client.js';
 import { ContactsCalendarClient } from './contacts-calendar.js';
 import { CalDAVCalendarClient } from './caldav-client.js';
-import { coerceStringArray, coerceBool, redactBearerTokens } from './coerce.js';
+import { coerceRecipients, coerceBool, redactBearerTokens } from './coerce.js';
 
 const server = new Server(
   {
@@ -1037,8 +1037,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'send_email': {
-        const { to, cc, bcc, from, mailboxId, subject, textBody, htmlBody, inReplyTo, references, replyTo } = args as any;
-        const toArray = coerceStringArray(to);
+        const { from, mailboxId, subject, textBody, htmlBody, inReplyTo, references } = args as any;
+        const { to: toArray, cc, bcc, replyTo } = coerceRecipients(args as any);
         if (!toArray || toArray.length === 0) {
           throw new McpError(ErrorCode.InvalidParams, 'to field is required and must be a non-empty array');
         }
@@ -1074,7 +1074,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'reply_email': {
-        const { originalEmailId, to, cc, bcc, from, textBody, htmlBody, send, replyTo } = args as any;
+        const { originalEmailId, from, textBody, htmlBody, send } = args as any;
+        const { to: toArray, cc, bcc, replyTo } = coerceRecipients(args as any);
         const shouldSend = coerceBool(send) ?? true;
         if (!originalEmailId) {
           throw new McpError(ErrorCode.InvalidParams, 'originalEmailId is required');
@@ -1105,7 +1106,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         }
 
         // Default recipients to the original sender
-        const toArray = coerceStringArray(to);
         const replyRecipients = (toArray && toArray.length > 0)
           ? toArray
           : (Array.isArray(originalEmail.from) ? originalEmail.from.map((addr: any) => addr.email).filter(Boolean) : []);
@@ -1152,7 +1152,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'create_draft': {
-        const { to, cc, bcc, from, mailboxId, subject, textBody, htmlBody, inReplyTo, references, replyTo } = args as any;
+        const { from, mailboxId, subject, textBody, htmlBody, inReplyTo, references } = args as any;
+        const { to, cc, bcc, replyTo } = coerceRecipients(args as any);
 
         if (!to?.length && !subject && !textBody && !htmlBody) {
           throw new McpError(ErrorCode.InvalidParams, 'At least one of to, subject, textBody, or htmlBody must be provided');
@@ -1190,7 +1191,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'edit_draft': {
-        const { emailId, to, cc, bcc, from, subject, textBody, htmlBody, replyTo } = args as any;
+        const { emailId, from, subject, textBody, htmlBody } = args as any;
+        const { to, cc, bcc, replyTo } = coerceRecipients(args as any);
         if (!emailId) {
           throw new McpError(ErrorCode.InvalidParams, 'emailId is required');
         }
