@@ -232,6 +232,33 @@ describe('createDraft', () => {
     );
   });
 
+  // 8e. Composite/injection from-string rejected even though it ends in the wildcard domain
+  it('rejects a composite from address against a wildcard identity', async () => {
+    const wildcardIdentity = { id: 'id-wild', email: '*@example.com', mayDelete: true };
+    mock.method(client, 'getIdentities', async () => [wildcardIdentity]);
+
+    await assert.rejects(
+      () => client.createDraft({ subject: 'Hi', from: 'attacker@evil.com,me@example.com' }),
+      (err: Error) => {
+        assert.match(err.message, /not verified/i);
+        return true;
+      },
+    );
+  });
+
+  it('rejects a from address with CR/LF against a wildcard identity', async () => {
+    const wildcardIdentity = { id: 'id-wild', email: '*@example.com', mayDelete: true };
+    mock.method(client, 'getIdentities', async () => [wildcardIdentity]);
+
+    await assert.rejects(
+      () => client.createDraft({ subject: 'Hi', from: 'a@example.com\r\nBCC:x@example.com' }),
+      (err: Error) => {
+        assert.match(err.message, /not verified/i);
+        return true;
+      },
+    );
+  });
+
   // 9. Custom mailboxId used instead of auto-lookup
   it('uses provided mailboxId without looking up mailboxes', async () => {
     const getMailboxes = client.getMailboxes as ReturnType<typeof mock.method>;

@@ -7,6 +7,10 @@ on:
   pull_request:
     branches: [ main ]
 
+# Read-only: this workflow only checks out and runs a smoke test.
+permissions:
+  contents: read
+
 jobs:
   smoke:
     runs-on: ubuntu-latest

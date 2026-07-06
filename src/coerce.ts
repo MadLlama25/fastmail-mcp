@@ -2,17 +2,44 @@
 // structured params before dispatch. These helpers coerce such values back to
 // their expected shapes so the handlers work against both strict and lenient clients.
 
-// Defense-in-depth: scrub bearer-token-shaped substrings from any string that
+// Defense-in-depth: scrub credential-shaped substrings from any string that
 // might be reflected back to the MCP caller (e.g. a JMAP error message). This
 // is intentionally narrow — provider error messages are useful for the LLM to
 // recover from, so we don't want to over-sanitize.
 const BEARER_PATTERN = /Bearer\s+\S+/gi;
-const FASTMAIL_TOKEN_PATTERN = /fmu\d+-[A-Za-z0-9-]{20,}/g;
+// Basic auth (CalDAV path uses HTTP Basic) — redact the base64 credential blob.
+const BASIC_PATTERN = /Basic\s+[A-Za-z0-9+/=]+/gi;
+// Fastmail token shape. `[\w-]` (not `[A-Za-z0-9-]`) so an underscore mid-token
+// can't end the match early and leak the remaining entropy.
+const FASTMAIL_TOKEN_PATTERN = /fmu\d+-[\w-]{20,}/g;
+
+// Exact known secret values registered at startup (API token, CalDAV password,
+// self-hosted tokens without a `Bearer`/`fmu` shape). Value-based redaction
+// catches credentials the pattern-based rules would miss. Populated by
+// registerSecret(); never logged.
+const KNOWN_SECRETS = new Set<string>();
+
+// Register a literal secret value so redactBearerTokens will scrub any exact
+// occurrence of it. No-ops on empty/short values to avoid over-broad matches.
+export function registerSecret(value: string | undefined): void {
+  if (typeof value === 'string' && value.length >= 8) {
+    KNOWN_SECRETS.add(value);
+  }
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 export function redactBearerTokens(input: string): string {
-  return input
+  let out = input
     .replace(BEARER_PATTERN, 'Bearer [REDACTED]')
+    .replace(BASIC_PATTERN, 'Basic [REDACTED]')
     .replace(FASTMAIL_TOKEN_PATTERN, 'fmu[REDACTED]');
+  for (const secret of KNOWN_SECRETS) {
+    out = out.replace(new RegExp(escapeRegExp(secret), 'g'), '[REDACTED]');
+  }
+  return out;
 }
 
 export function coerceStringArray(value: unknown): string[] | undefined {

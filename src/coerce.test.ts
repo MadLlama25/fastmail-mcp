@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { coerceStringArray, coerceRecipients, coerceBool, redactBearerTokens } from './coerce.js';
+import { coerceStringArray, coerceRecipients, coerceBool, redactBearerTokens, registerSecret } from './coerce.js';
 
 describe('coerceStringArray', () => {
   it('returns undefined for undefined input', () => {
@@ -161,5 +161,30 @@ describe('redactBearerTokens', () => {
 
   it('handles empty string', () => {
     assert.equal(redactBearerTokens(''), '');
+  });
+
+  it('redacts Basic auth credentials (CalDAV path)', () => {
+    const out = redactBearerTokens('401 on Authorization: Basic dXNlcjpwYXNzd29yZA== failed');
+    assert.match(out, /Basic \[REDACTED\]/);
+    assert.ok(!out.includes('dXNlcjpwYXNz'));
+  });
+
+  it('redacts a Fastmail token containing an underscore fully (no tail leak)', () => {
+    const out = redactBearerTokens('token fmu9-abcd1234-aaaaaaaaaaaaaaaaaaaa_bbbbbbbbbb invalid');
+    assert.match(out, /fmu\[REDACTED\]/);
+    assert.ok(!out.includes('bbbbbbbbbb'), 'the post-underscore tail must not survive');
+  });
+
+  it('redacts an exact registered secret value even without a recognizable shape', () => {
+    registerSecret('sk-pla1n-cr3dential-with-no-prefix');
+    const out = redactBearerTokens('self-hosted auth failed for sk-pla1n-cr3dential-with-no-prefix here');
+    assert.ok(!out.includes('sk-pla1n-cr3dential'));
+    assert.match(out, /\[REDACTED\]/);
+  });
+
+  it('registerSecret ignores short/empty values (avoids over-broad matches)', () => {
+    registerSecret('abc');
+    registerSecret('');
+    assert.equal(redactBearerTokens('the word abc should survive'), 'the word abc should survive');
   });
 });

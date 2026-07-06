@@ -6,7 +6,7 @@ import { DAVClient, DAVCalendar, DAVCalendarObject } from 'tsdav';
 // VEVENTs when start/end changes on a recurring event (matching Google Calendar
 // behavior). The rrule package has a single transitive dependency (tslib).
 import rruleLib from 'rrule';
-const { rrulestr } = rruleLib;
+const { rrulestr, RRule } = rruleLib;
 
 export interface CalDAVConfig {
   username: string;
@@ -972,6 +972,27 @@ export function normalizeMasterVEventFirst(icalData: string): string {
   return out;
 }
 
+/**
+ * Assert a tsdav write (create/update/delete calendar object) actually succeeded.
+ * tsdav returns the raw Response(s) without throwing on 4xx/5xx, so without this
+ * a server-side rejection would be reported to the caller as success. Accepts a
+ * single Response or an array; treats a missing status as success (older tsdav
+ * shapes) but fails loudly on any status outside 2xx.
+ */
+function assertDavOk(resp: unknown, action: string): void {
+  const responses = Array.isArray(resp) ? resp : [resp];
+  for (const r of responses) {
+    const status = (r as any)?.status;
+    const ok = (r as any)?.ok;
+    if (typeof status === 'number' && (status < 200 || status >= 300)) {
+      throw new Error(`Failed to ${action}: server returned ${status}${(r as any)?.statusText ? ' ' + (r as any).statusText : ''}`);
+    }
+    if (ok === false) {
+      throw new Error(`Failed to ${action}: server rejected the request`);
+    }
+  }
+}
+
 export class CalDAVCalendarClient {
   private config: CalDAVConfig;
   private client: DAVClient | null = null;
@@ -1144,11 +1165,11 @@ export class CalDAVCalendarClient {
         validateAttendeeEmail(p.email);
       }
 
-      // ORGANIZER required when ATTENDEEs present
+      // ORGANIZER required when ATTENDEEs present. Validate the username as a
+      // strict addr-spec (rejects ; , : CR LF etc.) so it can't corrupt or inject
+      // into the ORGANIZER line when embedded below.
       const caldavUsername = this.config.username;
-      if (!caldavUsername.includes('@')) {
-        throw new Error('Cannot add participants: CalDAV username is not an email address, required for ORGANIZER');
-      }
+      validateAttendeeEmail(caldavUsername);
       const displayName = process.env.FASTMAIL_CALDAV_DISPLAY_NAME || caldavUsername;
       const cnPart = `;CN=${quoteParamValue(displayName)}`;
       icalLines.push(foldICalLine(`ORGANIZER${cnPart}:mailto:${caldavUsername}`));
@@ -1166,11 +1187,12 @@ export class CalDAVCalendarClient {
     // Trailing CRLF per RFC 5545 §3.1
     const ical = icalLines.join('\r\n') + '\r\n';
 
-    await client.createCalendarObject({
+    const createResp = await client.createCalendarObject({
       calendar: targetCal,
       filename: `${uid}.ics`,
       iCalString: ical,
     });
+    assertDavOk(createResp, 'create calendar event');
 
     return uid;
   }
@@ -1254,7 +1276,18 @@ export class CalDAVCalendarClient {
               dtStartForRrule = newStartRaw.replace(/[-:]/g, '').replace(/Z$/, '');
             }
             const rruleString = `RRULE:${rruleLine}\nDTSTART:${dtStartForRrule}`;
-            const rule = rrulestr(rruleString, { forceset: false });
+            const rule = rrulestr(rruleString, { forceset: false }) as InstanceType<typeof RRule>;
+
+            // DoS guard: rule.between() iterates every occurrence from DTSTART up
+            // to the window. A hostile sub-daily frequency (FREQ=SECONDLY/MINUTELY/
+            // HOURLY) on an event whose exception RECURRENCE-ID is far from DTSTART
+            // forces astronomically many iterations. Calendar events can be authored
+            // by third parties (invitations), so skip selective pruning for sub-daily
+            // rules and fall through to the best-effort path (no deletion).
+            const freq = (rule as any).options?.freq;
+            if (typeof freq === 'number' && freq >= RRule.HOURLY) {
+              throw new Error('skip-pruning: sub-daily recurrence frequency');
+            }
 
             const orphanedDates: Date[] = [];
             const validDates: Date[] = [];
@@ -1417,7 +1450,8 @@ export class CalDAVCalendarClient {
     }
 
     obj.data = data;
-    await client.updateCalendarObject({ calendarObject: obj });
+    const updateResp = await client.updateCalendarObject({ calendarObject: obj });
+    assertDavOk(updateResp, 'update calendar event');
 
     return existingUid;
   }
@@ -1429,6 +1463,7 @@ export class CalDAVCalendarClient {
       throw new Error(`Calendar event not found: ${eventId}`);
     }
 
-    await client.deleteCalendarObject({ calendarObject: obj });
+    const deleteResp = await client.deleteCalendarObject({ calendarObject: obj });
+    assertDavOk(deleteResp, 'delete calendar event');
   }
 }

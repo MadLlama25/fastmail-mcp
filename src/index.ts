@@ -11,12 +11,12 @@ import { FastmailAuth, FastmailConfig } from './auth.js';
 import { JmapClient } from './jmap-client.js';
 import { ContactsCalendarClient } from './contacts-calendar.js';
 import { CalDAVCalendarClient } from './caldav-client.js';
-import { coerceRecipients, coerceBool, redactBearerTokens } from './coerce.js';
+import { coerceRecipients, coerceStringArray, coerceBool, redactBearerTokens, registerSecret } from './coerce.js';
 
 const server = new Server(
   {
     name: 'fastmail-mcp',
-    version: '1.11.0',
+    version: '1.11.1',
   },
   {
     capabilities: {
@@ -43,10 +43,6 @@ function findEnvValue(keys: string[]): { value?: string; key?: string; wasPlaceh
   return { value: undefined, key: undefined, wasPlaceholder: false };
 }
 
-function maskSecret(value: string): string {
-  if (value.length <= 6) return '***';
-  return `${value.slice(0, 4)}…${value.slice(-2)} (len ${value.length})`;
-}
 
 function getAuthConfig(): FastmailConfig {
   const tokenInfo = findEnvValue([
@@ -62,6 +58,9 @@ function getAuthConfig(): FastmailConfig {
       'FASTMAIL_API_TOKEN environment variable is required'
     );
   }
+  // Register for value-based redaction so an exact token occurrence in any
+  // error string is scrubbed even if it doesn't match the token-shape pattern.
+  registerSecret(apiToken);
 
   const baseInfo = findEnvValue([
     'FASTMAIL_BASE_URL',
@@ -115,6 +114,11 @@ function initializeCalDAVClient(): CalDAVCalendarClient | null {
 
   if (!username || !password) return null;
 
+  // Register the CalDAV password (and username) for value-based redaction —
+  // Basic-auth credentials aren't covered by the token-shape patterns.
+  registerSecret(password);
+  registerSecret(username);
+
   caldavClient = new CalDAVCalendarClient({ username, password });
   return caldavClient;
 }
@@ -126,6 +130,13 @@ function getDownloadDir(): string | undefined {
     'USER_CONFIG_fastmail_download_dir',
     'fastmail_download_dir',
   ]).value;
+}
+
+// Clamp a caller-supplied limit into [1, max], tolerating string and NaN input
+// (a lenient client may send "20", and a bare Number("abc") would yield NaN →
+// an unbounded/negative JMAP query).
+function clampLimit(value: unknown, fallback: number, max: number): number {
+  return Math.min(Math.max(Number(value) || fallback, 1), max);
 }
 
 server.setRequestHandler(ListToolsRequestSchema, async () => {
@@ -1432,8 +1443,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           subject,
           textBody,
           htmlBody,
-          inReplyTo,
-          references,
+          // Coerce so a lenient client's stringified array doesn't reach the JMAP
+          // Email object as a bare string (consistent with the recipient fields).
+          inReplyTo: coerceStringArray(inReplyTo),
+          references: coerceStringArray(references),
           replyTo,
         });
 
@@ -1542,8 +1555,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           subject,
           textBody,
           htmlBody,
-          inReplyTo,
-          references,
+          inReplyTo: coerceStringArray(inReplyTo),
+          references: coerceStringArray(references),
           replyTo,
         });
 
@@ -1645,9 +1658,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'list_contacts': {
-        const { limit = 50 } = args as any;
+        const { limit } = args as any;
         const contactsClient = initializeContactsCalendarClient();
-        const contacts = await contactsClient.getContacts(limit);
+        const contacts = await contactsClient.getContacts(clampLimit(limit, 50, 200));
         return {
           content: [
             {
@@ -1676,12 +1689,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'search_contacts': {
-        const { query, limit = 20 } = args as any;
+        const { query, limit } = args as any;
         if (!query) {
           throw new McpError(ErrorCode.InvalidParams, 'query is required');
         }
         const contactsClient = initializeContactsCalendarClient();
-        const contacts = await contactsClient.searchContacts(query, limit);
+        const contacts = await contactsClient.searchContacts(query, clampLimit(limit, 20, 100));
         return {
           content: [
             {
@@ -1709,7 +1722,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'list_calendar_events': {
-        const { calendarId, limit = 50, startDate, endDate } = args as any;
+        const { calendarId, limit, startDate, endDate } = args as any;
         // JMAP Calendars: disabled — spec not yet finalized, Fastmail has not enabled support.
         // Existing JMAP calendar code in contacts-calendar.ts has known bugs.
         // When Fastmail enables JMAP calendars: re-enable, fix to match finalized spec,
@@ -1718,7 +1731,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (!davClient) {
           throw new McpError(ErrorCode.InvalidRequest, 'CalDAV not configured. Set FASTMAIL_CALDAV_USERNAME and FASTMAIL_CALDAV_PASSWORD.');
         }
-        const events = await davClient.getCalendarEvents(calendarId, limit, startDate, endDate);
+        const events = await davClient.getCalendarEvents(calendarId, clampLimit(limit, 50, 500), startDate, endDate);
         return { content: [{ type: 'text', text: JSON.stringify(events, null, 2) }] };
       }
 
@@ -1763,7 +1776,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (!davClient) {
           throw new McpError(ErrorCode.InvalidRequest, 'CalDAV not configured. Set FASTMAIL_CALDAV_USERNAME and FASTMAIL_CALDAV_PASSWORD.');
         }
-        const fields = { title, description, start, end, location, participants, clearFields, confirmRecurring };
+        // Coerce confirmRecurring — a lenient client sending the string "false"
+        // would otherwise read as truthy and authorize destructive pruning of
+        // recurrence exceptions the caller explicitly declined to remove.
+        const fields = {
+          title, description, start, end, location, participants, clearFields,
+          confirmRecurring: coerceBool(confirmRecurring) ?? false,
+        };
         await davClient.updateCalendarEvent(eventId, fields);
         return { content: [{ type: 'text', text: `Calendar event updated. Event ID: ${eventId}` }] };
       }
@@ -1796,9 +1815,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'get_recent_emails': {
-        const { limit = 10, mailboxName = null, ascending } = args as any;
+        const { limit, mailboxName = null, ascending } = args as any;
         const client = initializeClient();
-        const emails = await client.getRecentEmails(limit, mailboxName, !!ascending);
+        const emails = await client.getRecentEmails(clampLimit(limit, 10, 50), mailboxName, coerceBool(ascending) ?? false);
         return {
           content: [
             {
@@ -1810,7 +1829,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'mark_email_read': {
-        const { emailId, read = true } = args as any;
+        const { emailId } = args as any;
+        // Coerce so a stringified "false" from a lenient client doesn't read as truthy.
+        const read = coerceBool((args as any).read) ?? true;
         if (!emailId) {
           throw new McpError(ErrorCode.InvalidParams, 'emailId is required');
         }
@@ -1827,7 +1848,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'pin_email': {
-        const { emailId, pinned = true } = args as any;
+        const { emailId } = args as any;
+        const pinned = coerceBool((args as any).pinned) ?? true;
         if (!emailId) {
           throw new McpError(ErrorCode.InvalidParams, 'emailId is required');
         }
@@ -1980,9 +2002,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             };
           }
         } catch (error) {
-          // Let path validation errors through so users see why their savePath was rejected
+          // Let path validation errors through so users see why their savePath was rejected.
+          // Redact defensively — the message echoes a caller-influenced path, and a future
+          // upstream error merely containing "Save path" would otherwise pass through raw.
           if (error instanceof Error && (error.message.includes('Save path') || error.message.includes('null bytes'))) {
-            throw new McpError(ErrorCode.InvalidParams, error.message);
+            throw new McpError(ErrorCode.InvalidParams, redactBearerTokens(error.message));
           }
           // Sanitize other errors to avoid leaking attachment metadata
           throw new McpError(
@@ -2360,7 +2384,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 ...operation,
                 status: 'FAILED',
                 executed: false,
-                error: error instanceof Error ? error.message : String(error),
+                error: redactBearerTokens(error instanceof Error ? error.message : String(error)),
                 timestamp: new Date().toISOString()
               });
             }
@@ -2382,7 +2406,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
   } catch (error) {
     if (error instanceof McpError) {
-      throw error;
+      // Redact defensively even on the McpError path — in-file McpErrors are
+      // static today, but this makes redaction a single choke point so a future
+      // McpError built from dynamic content can't slip a secret through.
+      const safe = redactBearerTokens(error.message);
+      if (safe === error.message) throw error;
+      throw new McpError((error as any).code ?? ErrorCode.InternalError, safe);
     }
     const raw = error instanceof Error ? error.message : String(error);
     throw new McpError(

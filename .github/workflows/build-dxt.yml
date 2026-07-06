@@ -6,6 +6,11 @@ on:
     tags:
       - 'v*'
 
+# Least privilege: the only elevated need is creating the release + uploading
+# the .dxt asset. Everything else runs read-only.
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest

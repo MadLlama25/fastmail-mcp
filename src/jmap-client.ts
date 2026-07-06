@@ -1,6 +1,6 @@
 import { FastmailAuth } from './auth.js';
 import { validateFastmailUrl } from './url-validation.js';
-import { writeFile, mkdir, realpath, stat, lstat } from 'fs/promises';
+import { writeFile, mkdir, realpath, stat, lstat, unlink } from 'fs/promises';
 import { dirname, resolve, normalize, sep, basename, join } from 'path';
 import { homedir } from 'os';
 
@@ -29,7 +29,11 @@ function matchesIdentity(identityEmail: string, address: string): boolean {
   if (identity === addr) return true;
   if (identity.startsWith('*@')) {
     const domain = identity.slice(1); // "@example.com"
-    return addr.endsWith(domain) && addr.indexOf('@') > 0;
+    // Require a single well-formed addr-spec before accepting the wildcard —
+    // otherwise a composite/spoofed value like "a@evil.com,b@example.com" or one
+    // carrying CR/LF would pass the client-side "verified identity" guard.
+    if (!/^[^\s@,;"]+@[^\s@,;"]+$/.test(addr)) return false;
+    return addr.endsWith(domain);
   }
   return false;
 }
@@ -187,10 +191,19 @@ export class JmapClient {
       throw new Error('Invalid session response: apiUrl missing');
     }
     validateFastmailUrl(sessionData.apiUrl, 'session.apiUrl', allowUnsafe);
-    if (typeof sessionData.downloadUrl === 'string') {
+    // Reject non-string download/upload URLs rather than storing them unvalidated
+    // (validate/store must not diverge — a later coercion would otherwise inherit
+    // an unchecked value).
+    if (sessionData.downloadUrl !== undefined) {
+      if (typeof sessionData.downloadUrl !== 'string') {
+        throw new Error('Invalid session response: downloadUrl is not a string');
+      }
       validateFastmailUrl(stripTemplate(sessionData.downloadUrl), 'session.downloadUrl', allowUnsafe);
     }
-    if (typeof sessionData.uploadUrl === 'string') {
+    if (sessionData.uploadUrl !== undefined) {
+      if (typeof sessionData.uploadUrl !== 'string') {
+        throw new Error('Invalid session response: uploadUrl is not a string');
+      }
       validateFastmailUrl(stripTemplate(sessionData.uploadUrl), 'session.uploadUrl', allowUnsafe);
     }
 
@@ -1394,6 +1407,11 @@ export class JmapClient {
       .replace('{type}', encodeURIComponent(attachment.type || 'application/octet-stream'))
       .replace('{name}', encodeURIComponent(attachment.name || 'attachment'));
 
+    // Re-validate the substituted URL before it's used to send the bearer token —
+    // defends against a template whose placeholders were filled with values that
+    // rewrote the origin (belt-and-suspenders over the session-time origin check).
+    validateFastmailUrl(url, 'downloadUrl', this.auth.getAllowUnsafe());
+
     return url;
   }
 
@@ -1484,11 +1502,18 @@ export class JmapClient {
   }
 
   async downloadAttachmentToFile(emailId: string, attachmentId: string, savePath: string, downloadDir?: string): Promise<{ url: string; bytesWritten: number; savedPath: string }> {
-    const safePath = await JmapClient.safeWritePath(savePath, downloadDir);
+    // First check + create the parent dir before the (slow) network fetch, to
+    // shrink the window in which a co-resident process could swap a checked
+    // directory for a symlink.
+    await JmapClient.safeWritePath(savePath, downloadDir);
     const url = await this.downloadAttachment(emailId, attachmentId);
 
     const response = await fetch(url, {
-      headers: { 'Authorization': this.auth.getAuthHeaders()['Authorization'] }
+      headers: { 'Authorization': this.auth.getAuthHeaders()['Authorization'] },
+      // Never follow a redirect on a token-bearing request — a validated host
+      // that 3xx-redirects cross-origin would otherwise have the attachment body
+      // silently sourced from a non-allowlisted host.
+      redirect: 'error',
     });
 
     if (!response.ok) {
@@ -1497,8 +1522,21 @@ export class JmapClient {
 
     const buffer = Buffer.from(await response.arrayBuffer());
 
+    // Re-validate immediately before writing (TOCTOU: the target may have been
+    // swapped for a symlink during the fetch), then write with O_EXCL so we
+    // never follow a symlink planted at the path. Overwriting a pre-existing
+    // regular file stays supported: on EEXIST we re-run the symlink-safe check
+    // (which refuses a symlink) and replace the plain file.
+    const safePath = await JmapClient.safeWritePath(savePath, downloadDir);
     await mkdir(dirname(safePath), { recursive: true });
-    await writeFile(safePath, buffer);
+    try {
+      await writeFile(safePath, buffer, { flag: 'wx' });
+    } catch (e: any) {
+      if (e?.code !== 'EEXIST') throw e;
+      await JmapClient.safeWritePath(savePath, downloadDir); // refuses a symlink at target
+      await unlink(safePath);
+      await writeFile(safePath, buffer, { flag: 'wx' });
+    }
 
     return { url, bytesWritten: buffer.length, savedPath: safePath };
   }

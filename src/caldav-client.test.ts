@@ -2285,3 +2285,83 @@ describe('removeOrphanedVTimezones quoted/folded references', () => {
     assert.ok(!out.includes('BEGIN:VTIMEZONE'));
   });
 });
+
+// ---------- v1.11.1 security fixes ----------
+
+describe('updateCalendarEvent — rrule DoS guard', () => {
+  function mockClient(icalData: string) {
+    const client = new CalDAVCalendarClient({ username: 'test@fastmail.com', password: 'test' });
+    (client as any).client = {
+      login: mock.fn(async () => {}),
+      fetchCalendars: mock.fn(async () => [{ displayName: 'Personal', url: '/cal/personal/' }]),
+      fetchCalendarObjects: mock.fn(async () => [{ data: icalData, url: '/cal/dos.ics' }]),
+      updateCalendarObject: mock.fn(async () => ({ status: 207 })),
+    };
+    return client;
+  }
+
+  it('does not hang on a sub-daily RRULE with a distant exception (falls through to no-prune)', async () => {
+    // FREQ=SECONDLY + an exception decades out would force billions of rrule
+    // iterations without the guard. With it, the update completes and the
+    // exception VEVENT is preserved (best-effort: nothing pruned).
+    const ical = [
+      'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//t//t//EN',
+      'BEGIN:VEVENT', 'UID:dos@fm', 'DTSTAMP:20260101T000000Z',
+      'DTSTART:20260101T090000Z', 'DTEND:20260101T093000Z',
+      'RRULE:FREQ=SECONDLY;INTERVAL=1', 'SUMMARY:Rapid',
+      'END:VEVENT',
+      'BEGIN:VEVENT', 'UID:dos@fm', 'RECURRENCE-ID:20990101T090000Z',
+      'DTSTART:20990101T090000Z', 'DTEND:20990101T093000Z', 'SUMMARY:Far exception',
+      'END:VEVENT',
+      'END:VCALENDAR',
+    ].join('\r\n');
+    const client = mockClient(ical);
+    const started = Date.now();
+    await client.updateCalendarEvent('dos@fm', { start: '2026-01-01T10:00:00Z', confirmRecurring: true });
+    // Should return promptly, not spin. Generous bound to avoid flakiness.
+    assert.ok(Date.now() - started < 3000, 'guard should prevent unbounded rrule expansion');
+    const written = (client as any).client.updateCalendarObject.mock.calls[0].arguments[0].calendarObject.data;
+    assert.ok(written.includes('Far exception'), 'exception must be preserved, not pruned');
+  });
+});
+
+describe('CalDAV write status checking (assertDavOk)', () => {
+  function mockClientWithStatus(status: number) {
+    const ical = [
+      'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//t//t//EN',
+      'BEGIN:VEVENT', 'UID:s@fm', 'DTSTAMP:20260101T000000Z',
+      'DTSTART:20260101T090000Z', 'DTEND:20260101T093000Z', 'SUMMARY:S',
+      'END:VEVENT', 'END:VCALENDAR',
+    ].join('\r\n');
+    const client = new CalDAVCalendarClient({ username: 'test@fastmail.com', password: 'test' });
+    (client as any).client = {
+      login: mock.fn(async () => {}),
+      fetchCalendars: mock.fn(async () => [{ displayName: 'Personal', url: '/cal/personal/' }]),
+      fetchCalendarObjects: mock.fn(async () => [{ data: ical, url: '/cal/s.ics' }]),
+      updateCalendarObject: mock.fn(async () => ({ status })),
+      deleteCalendarObject: mock.fn(async () => ({ status })),
+    };
+    return client;
+  }
+
+  it('throws when the server returns a 4xx/5xx on update', async () => {
+    const client = mockClientWithStatus(500);
+    await assert.rejects(
+      () => client.updateCalendarEvent('s@fm', { title: 'X' }),
+      /Failed to update calendar event: server returned 500/,
+    );
+  });
+
+  it('throws when the server returns a 4xx on delete', async () => {
+    const client = mockClientWithStatus(403);
+    await assert.rejects(
+      () => client.deleteCalendarEvent('s@fm'),
+      /Failed to delete calendar event: server returned 403/,
+    );
+  });
+
+  it('succeeds on a 2xx status', async () => {
+    const client = mockClientWithStatus(204);
+    await client.updateCalendarEvent('s@fm', { title: 'X' });
+  });
+});
