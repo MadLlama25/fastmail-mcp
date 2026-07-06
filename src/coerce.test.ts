@@ -143,7 +143,7 @@ describe('redactBearerTokens', () => {
   it('redacts Fastmail token shape (fmu...)', () => {
     // Synthetic value — matches the fmuN-<hex>-<hex>-N-<hex> shape only, never a real token.
     const out = redactBearerTokens(
-      'Failed: token fmu0-00000000-1111111111111111111111111111111a-0-2222222222222222222222222222222b invalid'
+      'Failed: token fmu0-00000000-1111111111111111111111111111111a-0-2222222222222222222222222222222b invalid' // allowlist-secret (synthetic)
     );
     assert.match(out, /fmu\[REDACTED\]/);
     assert.ok(!out.includes('fmu0-0000'));
@@ -164,13 +164,13 @@ describe('redactBearerTokens', () => {
   });
 
   it('redacts Basic auth credentials (CalDAV path)', () => {
-    const out = redactBearerTokens('401 on Authorization: Basic dXNlcjpwYXNzd29yZA== failed');
+    const out = redactBearerTokens('401 on Authorization: Basic dXNlcjpwYXNzd29yZA== failed'); // allowlist-secret (synthetic base64 of "user:password")
     assert.match(out, /Basic \[REDACTED\]/);
     assert.ok(!out.includes('dXNlcjpwYXNz'));
   });
 
   it('redacts a Fastmail token containing an underscore fully (no tail leak)', () => {
-    const out = redactBearerTokens('token fmu9-abcd1234-aaaaaaaaaaaaaaaaaaaa_bbbbbbbbbb invalid');
+    const out = redactBearerTokens('token fmu9-abcd1234-aaaaaaaaaaaaaaaaaaaa_bbbbbbbbbb invalid'); // allowlist-secret (synthetic)
     assert.match(out, /fmu\[REDACTED\]/);
     assert.ok(!out.includes('bbbbbbbbbb'), 'the post-underscore tail must not survive');
   });

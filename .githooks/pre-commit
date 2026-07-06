@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Pre-commit hook: block secrets and personal information from being committed.
+# Enable once per clone with:  git config core.hooksPath .githooks
+set -euo pipefail
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "pre-commit: node not found; skipping secret scan" >&2
+  exit 0
+fi
+
+node scripts/scan-secrets.mjs --staged

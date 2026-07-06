@@ -12,7 +12,8 @@
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
     "prepare": "npm run build",
-    "test": "tsx --test src/**/*.test.ts"
+    "test": "tsx --test src/**/*.test.ts",
+    "scan:secrets": "node scripts/scan-secrets.mjs --all"
   },
   "engines": {
     "node": ">=20"

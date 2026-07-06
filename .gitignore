@@ -15,3 +15,5 @@ test-live*.js
 # Local agent/config state that may hold credentials — never commit.
 .claude/
 settings.local.json
+# Local secret/PII denylist (personal domains/addresses) — never commit.
+.secret-scan-local.txt

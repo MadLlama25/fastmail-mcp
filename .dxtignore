@@ -1,0 +1,29 @@
+# Files excluded from the packaged .dxt extension.
+# The runtime entry point is dist/index.js, so source and tests must NOT ship —
+# this is what prevents a test fixture (or any source-only data) from ever being
+# published inside a release binary.
+
+# Source & tests (compiled output lives in dist/)
+src/
+*.test.ts
+*.test.js
+*.test.mjs
+
+# Local/live test scripts (also gitignored)
+test-live*
+.secret-scan-local.txt
+
+# Tooling / CI / repo scaffolding — not needed at runtime
+scripts/
+.github/
+.githooks/
+.gitignore
+.dxtignore
+.mcp.json
+tsconfig.json
+.env
+.env.*
+
+# Dev docs / meta
+CLAUDE.md
+.secret-scan-local.txt.example
