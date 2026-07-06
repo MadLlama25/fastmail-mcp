@@ -433,7 +433,7 @@ export class JmapClient {
     const emailObject: any = {
       mailboxIds,
       keywords: { $draft: true },
-      from: [{ email: fromEmail }],
+      from: [{ name: selectedIdentity.name, email: fromEmail }],
     };
 
     if (email.to?.length) emailObject.to = email.to.map(addr => ({ email: addr }));
@@ -576,7 +576,7 @@ export class JmapClient {
     const emailObject: any = {
       mailboxIds: existingEmail.mailboxIds,
       keywords: { $draft: true },
-      from: [{ email: updates.from || existingEmail.from?.[0]?.email || selectedIdentity.email }],
+      from: [{ name: selectedIdentity.name, email: updates.from || existingEmail.from?.[0]?.email || selectedIdentity.email }],
       to: mergedTo,
       cc: mergedCc,
       bcc: mergedBcc,
