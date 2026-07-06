@@ -1091,7 +1091,13 @@ export class JmapClient {
 
   static validateSavePath(savePath: string, downloadDir?: string): string {
     const allowedDir = downloadDir ? resolve(normalize(downloadDir)) : JmapClient.DEFAULT_DOWNLOADS_DIR;
-    const resolved = resolve(normalize(savePath));
+    // Resolve relative paths against the allowed download directory rather than
+    // the process cwd (which is unpredictable for an MCP server launched by a
+    // client). Absolute paths are taken as-is; either way the containment check
+    // below is the security boundary. So a bare filename lands safely in the
+    // configured dir in one step, and an absolute path inside that dir writes
+    // exactly there.
+    const resolved = resolve(allowedDir, normalize(savePath));
 
     if (resolved.includes('\0')) {
       throw new Error('Save path contains null bytes');
@@ -1167,7 +1173,7 @@ export class JmapClient {
     return safePath;
   }
 
-  async downloadAttachmentToFile(emailId: string, attachmentId: string, savePath: string, downloadDir?: string): Promise<{ url: string; bytesWritten: number }> {
+  async downloadAttachmentToFile(emailId: string, attachmentId: string, savePath: string, downloadDir?: string): Promise<{ url: string; bytesWritten: number; savedPath: string }> {
     const safePath = await JmapClient.safeWritePath(savePath, downloadDir);
     const url = await this.downloadAttachment(emailId, attachmentId);
 
@@ -1184,7 +1190,7 @@ export class JmapClient {
     await mkdir(dirname(safePath), { recursive: true });
     await writeFile(safePath, buffer);
 
-    return { url, bytesWritten: buffer.length };
+    return { url, bytesWritten: buffer.length, savedPath: safePath };
   }
 
   async advancedSearch(filters: {

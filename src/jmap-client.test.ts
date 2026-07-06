@@ -1,7 +1,7 @@
 import { describe, it, beforeEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { homedir } from 'os';
-import { resolve, join, basename } from 'path';
+import { resolve, join, basename, sep } from 'path';
 import { JmapClient } from './jmap-client.js';
 import { FastmailAuth } from './auth.js';
 
@@ -730,6 +730,41 @@ describe('validateSavePath', () => {
     const customDir = '/tmp/my-downloads';
     assert.throws(
       () => JmapClient.validateSavePath(`${customDir}/../../etc/shadow`, customDir),
+      (err: Error) => {
+        assert.match(err.message, /must be within/);
+        return true;
+      },
+    );
+  });
+
+  it('resolves a relative savePath against the download directory', () => {
+    const customDir = resolve('tmp', 'my-downloads');
+    const result = JmapClient.validateSavePath('report.pdf', customDir);
+    assert.equal(result, join(customDir, 'report.pdf'));
+  });
+
+  it('resolves a relative savePath with subdirectories against the download directory', () => {
+    const customDir = resolve('tmp', 'my-downloads');
+    const result = JmapClient.validateSavePath(join('thread', 'invoice.pdf'), customDir);
+    assert.equal(result, join(customDir, 'thread', 'invoice.pdf'));
+  });
+
+  it('rejects a relative savePath that traverses out of the download directory', () => {
+    const customDir = resolve('tmp', 'my-downloads');
+    assert.throws(
+      () => JmapClient.validateSavePath('../escape.pdf', customDir),
+      (err: Error) => {
+        assert.match(err.message, /must be within/);
+        return true;
+      },
+    );
+  });
+
+  it('rejects a Windows drive-absolute path outside the download directory', function () {
+    if (sep !== '\\') return; // drive-absolute semantics are win32-only
+    const customDir = resolve('C:\\Users\\me\\Downloads', 'fastmail-mcp');
+    assert.throws(
+      () => JmapClient.validateSavePath('C:\\Windows\\evil.exe', customDir),
       (err: Error) => {
         assert.match(err.message, /must be within/);
         return true;

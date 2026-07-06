@@ -75,7 +75,9 @@ A Model Context Protocol (MCP) server that provides access to the Fastmail API, 
    # Only api.fastmail.com and www.fastmailusercontent.com are accepted by default.
    # For self-hosted JMAP servers, also set FASTMAIL_ALLOW_UNSAFE_BASE_URL=true.
    export FASTMAIL_BASE_URL="https://api.fastmail.com"
-   # Optional: customize attachment download directory (defaults to ~/Downloads/fastmail-mcp/)
+   # Optional: customize attachment download directory (defaults to ~/Downloads/fastmail-mcp/).
+   # download_attachment savePaths are confined to this directory; set it to the root
+   # you want attachments saved under to write there directly in one step.
    export FASTMAIL_DOWNLOAD_DIR="/path/to/your/downloads"
    ```
 
@@ -179,6 +181,7 @@ You can install this server as a Desktop Extension for Claude Desktop using the 
   - Parameters: `emailId` (required)
 - **download_attachment**: Download an email attachment. If savePath is provided, saves the file to disk and returns the file path and size. Otherwise returns a download URL.
   - Parameters: `emailId` (required), `attachmentId` (required), `savePath` (optional)
+  - `savePath` may be absolute or relative. Relative paths (including a bare filename) resolve against the download directory, so an attachment lands there in one step. Absolute paths must fall within that directory; traversal or symlink escape outside it is rejected. To save directly into your own location, set `FASTMAIL_DOWNLOAD_DIR` to that root — confinement stays on, scoped to the directory you choose.
 - **advanced_search**: Advanced email search with multiple criteria
   - Parameters: `query` (optional), `from` (optional), `to` (optional), `subject` (optional), `hasAttachment` (optional), `isUnread` (optional), `mailboxId` (optional), `after` (optional), `before` (optional), `limit` (default: 50), `ascending` (optional, oldest first)
 - **get_thread**: Get all emails in a conversation thread
