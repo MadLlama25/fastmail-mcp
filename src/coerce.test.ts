@@ -141,11 +141,12 @@ describe('redactBearerTokens', () => {
   });
 
   it('redacts Fastmail token shape (fmu...)', () => {
+    // Synthetic value — matches the fmuN-<hex>-<hex>-N-<hex> shape only, never a real token.
     const out = redactBearerTokens(
-      'Failed: token fmu1-3b1e4048-036f4f86690cd04d8d05105a369ee30b-0-dbfc727af72d5e3e27dd324675869337 invalid'
+      'Failed: token fmu0-00000000-1111111111111111111111111111111a-0-2222222222222222222222222222222b invalid'
     );
     assert.match(out, /fmu\[REDACTED\]/);
-    assert.ok(!out.includes('fmu1-3b1e'));
+    assert.ok(!out.includes('fmu0-0000'));
   });
 
   it('does not redact unrelated text', () => {
