@@ -115,13 +115,20 @@ export function parseCalendarObject(obj: DAVCalendarObject): CalendarEvent {
 /**
  * Unescape an iCalendar text value (RFC 5545 §3.3.11).
  * Reverses escaping of newlines, semicolons, commas, and backslashes.
+ *
+ * Done in a single left-to-right pass so each escape is decoded exactly once.
+ * Chained .replace() calls re-scan the whole string and corrupt an escaped
+ * backslash that precedes an escapable char: e.g. "\\n" (an escaped backslash
+ * followed by a literal "n") would have its second "\n" turned into a newline,
+ * yielding "\<newline>" instead of the correct "\n".
  */
 export function unescapeICalText(value: string): string {
-  return value
-    .replace(/\\n/gi, '\n')
-    .replace(/\\;/g, ';')
-    .replace(/\\,/g, ',')
-    .replace(/\\\\/g, '\\');
+  return value.replace(/\\(\\|;|,|[nN])/g, (_, ch) => {
+    if (ch === 'n' || ch === 'N') return '\n';
+    if (ch === ',') return ',';
+    if (ch === ';') return ';';
+    return '\\';
+  });
 }
 
 /**

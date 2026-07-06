@@ -6,6 +6,7 @@ import {
   formatICalDate,
   parseCalendarObject,
   escapeICalText,
+  unescapeICalText,
   validateAndFormatICalDate,
   CalDAVCalendarClient,
 } from './caldav-client.js';
@@ -267,6 +268,39 @@ describe('escapeICalText', () => {
     assert.ok(!escaped.includes('\r'), 'escaped text must not contain literal carriage returns');
     // The entire payload is on one logical ICS line, so END:VEVENT can't terminate the block
     assert.ok(escaped.startsWith('Meeting\\n'), 'newlines should be escaped, not literal');
+  });
+});
+
+describe('unescapeICalText', () => {
+  it('unescapes newlines', () => {
+    assert.equal(unescapeICalText('line1\\nline2'), 'line1\nline2');
+    assert.equal(unescapeICalText('line1\\Nline2'), 'line1\nline2');
+  });
+
+  it('unescapes semicolons and commas', () => {
+    assert.equal(unescapeICalText('a\\;b\\;c'), 'a;b;c');
+    assert.equal(unescapeICalText('Room A\\, Building 1'), 'Room A, Building 1');
+  });
+
+  it('unescapes backslashes', () => {
+    assert.equal(unescapeICalText('path\\\\to\\\\file'), 'path\\to\\file');
+  });
+
+  it('decodes an escaped backslash followed by "n" as a literal backslash + n, not a newline', () => {
+    // "\\n" in iCal = an escaped backslash ("\\") followed by a literal "n".
+    // A chained-replace implementation corrupts this into "\<newline>".
+    assert.equal(unescapeICalText('\\\\n'), '\\n');
+    assert.equal(unescapeICalText('C:\\\\next'), 'C:\\next');
+  });
+
+  it('round-trips with escapeICalText', () => {
+    for (const original of ['plain', 'a;b,c', 'line1\nline2', 'back\\slash', 'C:\\next', 'mix\n;,\\end']) {
+      assert.equal(unescapeICalText(escapeICalText(original)), original);
+    }
+  });
+
+  it('leaves plain text unchanged', () => {
+    assert.equal(unescapeICalText('Team Standup'), 'Team Standup');
   });
 });
 
