@@ -11,6 +11,12 @@ export class ContactsCalendarClient extends JmapClient {
     const session = await this.getSession();
     return !!session.capabilities['urn:ietf:params:jmap:calendars'];
   }
+
+  /** Contacts may live on a different primary account than mail. */
+  private async contactsAccountId(): Promise<string> {
+    const session = await this.getSession();
+    return session.primaryAccounts?.['urn:ietf:params:jmap:contacts'] ?? session.accountId;
+  }
   
   async getContacts(limit: number = 50): Promise<QueryResult> {
     // Check permissions first
@@ -271,6 +277,156 @@ export class ContactsCalendarClient extends JmapClient {
       return eventId;
     } catch (error) {
       throw new Error(`Calendar event creation not supported: ${error instanceof Error ? error.message : String(error)}. Try checking account permissions or enabling calendar API access in Fastmail settings.`);
+    }
+  }
+
+  // ---------- contacts write (JMAP ContactCard/set, RFC 9610) ----------
+  //
+  // A live probe confirmed Fastmail accepts ContactCard/set with an RFC 9610
+  // Card shape; the server assigns the default address book, uid, and prodId.
+  // Note: creation-id references ("#id") are NOT resolved in destroy arrays by
+  // Fastmail's backend — always destroy by real id.
+
+  /** Map the flat tool-facing input onto an RFC 9610 Card (arrays -> Id-maps). */
+  private buildCardProperties(input: {
+    name?: { given?: string; surname?: string; full?: string };
+    emails?: Array<{ address: string; label?: string }>;
+    phones?: Array<{ number: string; label?: string }>;
+    addresses?: Array<{ full: string; label?: string }>;
+    notes?: string;
+  }): Record<string, any> {
+    const card: Record<string, any> = {};
+
+    if (input.name) {
+      const components: Array<{ kind: string; value: string }> = [];
+      if (input.name.given) components.push({ kind: 'given', value: input.name.given });
+      if (input.name.surname) components.push({ kind: 'surname', value: input.name.surname });
+      card.name = {
+        ...(components.length && { components }),
+        ...(input.name.full && { full: input.name.full }),
+      };
+    }
+    const toIdMap = (items: any[] | undefined, prefix: string) => {
+      if (!items?.length) return undefined;
+      const map: Record<string, any> = {};
+      items.forEach((item, i) => { map[`${prefix}${i}`] = item; });
+      return map;
+    };
+    const emails = toIdMap(input.emails, 'e');
+    const phones = toIdMap(input.phones, 'p');
+    const addresses = toIdMap(input.addresses, 'a');
+    if (emails) card.emails = emails;
+    if (phones) card.phones = phones;
+    if (addresses) card.addresses = addresses;
+    if (input.notes) card.notes = { n0: { note: input.notes } };
+
+    return card;
+  }
+
+  async createContact(input: {
+    name?: { given?: string; surname?: string; full?: string };
+    emails?: Array<{ address: string; label?: string }>;
+    phones?: Array<{ number: string; label?: string }>;
+    addresses?: Array<{ full: string; label?: string }>;
+    notes?: string;
+    addressBookId?: string;
+  }): Promise<string> {
+    const hasName = !!(input.name?.full || input.name?.given || input.name?.surname);
+    if (!hasName && !input.emails?.length) {
+      throw new Error('A contact needs a name or at least one email address');
+    }
+
+    const accountId = await this.contactsAccountId();
+    const card: Record<string, any> = {
+      '@type': 'Card',
+      version: '1.0',
+      ...this.buildCardProperties(input),
+      ...(input.addressBookId && { addressBookIds: { [input.addressBookId]: true } }),
+    };
+
+    const request: JmapRequest = {
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:contacts'],
+      methodCalls: [
+        ['ContactCard/set', { accountId, create: { newContact: card } }, 'createContact'],
+      ],
+    };
+
+    const response = await this.makeRequest(request);
+    const result = this.getMethodResult(response, 0);
+    if (result.notCreated?.newContact) {
+      const err = result.notCreated.newContact;
+      throw new Error(`Failed to create contact: ${err.type}${err.description ? ' - ' + err.description : ''}`);
+    }
+    const id = result.created?.newContact?.id;
+    if (!id) {
+      throw new Error('Contact creation returned no id');
+    }
+    return id;
+  }
+
+  async updateContact(id: string, patch: {
+    name?: { given?: string; surname?: string; full?: string };
+    emails?: Array<{ address: string; label?: string }>;
+    phones?: Array<{ number: string; label?: string }>;
+    addresses?: Array<{ full: string; label?: string }>;
+    notes?: string;
+    expectState?: string;
+  }): Promise<void> {
+    const { expectState, ...fields } = patch;
+    const patchObject = this.buildCardProperties(fields);
+    if (Object.keys(patchObject).length === 0) {
+      throw new Error('At least one field to update must be provided (name, emails, phones, addresses, or notes)');
+    }
+
+    const accountId = await this.contactsAccountId();
+
+    // Existence check first, for a clean not-found error (repo convention).
+    const getResponse = await this.makeRequest({
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:contacts'],
+      methodCalls: [['ContactCard/get', { accountId, ids: [id], properties: ['id'] }, 'g']],
+    });
+    if (!this.getListResult(getResponse, 0)[0]) {
+      throw new Error(`Contact not found: ${id}`);
+    }
+
+    // JMAP PatchObject semantics: each provided top-level field wholly
+    // replaces the stored value (e.g. emails: [] clears all emails).
+    const response = await this.makeRequest({
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:contacts'],
+      methodCalls: [
+        ['ContactCard/set', {
+          accountId,
+          update: { [id]: patchObject },
+          ...(expectState && { ifInState: expectState }),
+        }, 'updateContact'],
+      ],
+    });
+    const result = this.getMethodResult(response, 0);
+    if (result.notUpdated?.[id]) {
+      const err = result.notUpdated[id];
+      throw new Error(`Failed to update contact: ${err.type}${err.description ? ' - ' + err.description : ''}`);
+    }
+  }
+
+  async deleteContact(id: string, expectState?: string): Promise<void> {
+    const accountId = await this.contactsAccountId();
+    const response = await this.makeRequest({
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:contacts'],
+      methodCalls: [
+        ['ContactCard/set', {
+          accountId,
+          destroy: [id],
+          ...(expectState && { ifInState: expectState }),
+        }, 'deleteContact'],
+      ],
+    });
+    const result = this.getMethodResult(response, 0);
+    if (result.notDestroyed?.[id]) {
+      const err = result.notDestroyed[id];
+      if (err.type === 'notFound') {
+        throw new Error(`Contact not found: ${id}`);
+      }
+      throw new Error(`Failed to delete contact: ${err.type}${err.description ? ' - ' + err.description : ''}`);
     }
   }
 }

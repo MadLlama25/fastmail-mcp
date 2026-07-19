@@ -715,6 +715,132 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: 'create_contact',
+        description: 'Create a new contact in the address book. Requires a name or at least one email address. Requires an API token with read-write contacts scope.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            name: {
+              type: 'object',
+              description: 'Structured name; provide full and/or given/surname',
+              properties: {
+                given: { type: 'string' },
+                surname: { type: 'string' },
+                full: { type: 'string', description: 'Full display name' },
+              },
+            },
+            emails: {
+              type: 'array',
+              description: 'Email addresses (replaces ALL existing emails on update; [] clears)',
+              items: {
+                type: 'object',
+                properties: {
+                  address: { type: 'string' },
+                  label: { type: 'string', description: 'Optional label, e.g. work / home' },
+                },
+                required: ['address'],
+              },
+            },
+            phones: {
+              type: 'array',
+              description: 'Phone numbers (replaces ALL existing phones on update)',
+              items: {
+                type: 'object',
+                properties: {
+                  number: { type: 'string' },
+                  label: { type: 'string' },
+                },
+                required: ['number'],
+              },
+            },
+            addresses: {
+              type: 'array',
+              description: 'Postal addresses as free-form text (replaces ALL existing on update)',
+              items: {
+                type: 'object',
+                properties: {
+                  full: { type: 'string', description: 'Full address as one string' },
+                  label: { type: 'string' },
+                },
+                required: ['full'],
+              },
+            },
+            notes: { type: 'string', description: 'Free-form note (replaces the existing note on update)' },
+            addressBookId: { type: 'string', description: 'Target address book id (default book when omitted)' },
+          },
+        },
+      },
+      {
+        name: 'update_contact',
+        description: 'Update an existing contact. Each provided field WHOLLY REPLACES the stored value (e.g. emails: [] removes all emails) — unspecified fields are left untouched. Requires read-write contacts scope.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            contactId: { type: 'string', description: 'ID of the contact to update' },
+            name: {
+              type: 'object',
+              description: 'Structured name; provide full and/or given/surname',
+              properties: {
+                given: { type: 'string' },
+                surname: { type: 'string' },
+                full: { type: 'string', description: 'Full display name' },
+              },
+            },
+            emails: {
+              type: 'array',
+              description: 'Email addresses (replaces ALL existing emails on update; [] clears)',
+              items: {
+                type: 'object',
+                properties: {
+                  address: { type: 'string' },
+                  label: { type: 'string', description: 'Optional label, e.g. work / home' },
+                },
+                required: ['address'],
+              },
+            },
+            phones: {
+              type: 'array',
+              description: 'Phone numbers (replaces ALL existing phones on update)',
+              items: {
+                type: 'object',
+                properties: {
+                  number: { type: 'string' },
+                  label: { type: 'string' },
+                },
+                required: ['number'],
+              },
+            },
+            addresses: {
+              type: 'array',
+              description: 'Postal addresses as free-form text (replaces ALL existing on update)',
+              items: {
+                type: 'object',
+                properties: {
+                  full: { type: 'string', description: 'Full address as one string' },
+                  label: { type: 'string' },
+                },
+                required: ['full'],
+              },
+            },
+            notes: { type: 'string', description: 'Free-form note (replaces the existing note on update)' },
+            expectState: { type: 'string', description: 'Optional JMAP state precondition (ifInState); update fails with stateMismatch if contacts changed since this state' },
+          },
+          required: ['contactId'],
+        },
+      },
+      {
+        name: 'delete_contact',
+        description: 'Permanently delete a contact from the address book. This cannot be undone. Requires read-write contacts scope.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            contactId: { type: 'string', description: 'ID of the contact to delete' },
+            expectState: { type: 'string', description: 'Optional JMAP state precondition (ifInState)' },
+          },
+          required: ['contactId'],
+        },
+      },
+      {
         name: 'list_calendars',
         description: 'List all calendars',
         inputSchema: {
@@ -1855,6 +1981,54 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       // do a parity pass with CalDAV implementation, and test against live Fastmail.
       // CalDAV tests should be structured so they can serve as a basis for JMAP tests later.
 
+      case 'create_contact': {
+        const { name, emails, phones, addresses, notes, addressBookId } = args as any;
+        const contactsClient = initializeContactsCalendarClient();
+        const contactId = await contactsClient.createContact({ name, emails, phones, addresses, notes, addressBookId });
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Contact created successfully. Contact ID: ${contactId}`,
+            },
+          ],
+        };
+      }
+
+      case 'update_contact': {
+        const { contactId, name, emails, phones, addresses, notes, expectState } = args as any;
+        if (!contactId) {
+          throw new McpError(ErrorCode.InvalidParams, 'contactId is required');
+        }
+        const contactsClient = initializeContactsCalendarClient();
+        await contactsClient.updateContact(contactId, { name, emails, phones, addresses, notes, expectState });
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Contact updated successfully. Contact ID: ${contactId}`,
+            },
+          ],
+        };
+      }
+
+      case 'delete_contact': {
+        const { contactId, expectState } = args as any;
+        if (!contactId) {
+          throw new McpError(ErrorCode.InvalidParams, 'contactId is required');
+        }
+        const contactsClient = initializeContactsCalendarClient();
+        await contactsClient.deleteContact(contactId, expectState);
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Contact deleted. Contact ID: ${contactId}`,
+            },
+          ],
+        };
+      }
+
       case 'list_calendars': {
         const davClient = initializeCalDAVClient();
         if (!davClient) {
@@ -2437,9 +2611,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           },
           contacts: {
             available: !!session.capabilities['urn:ietf:params:jmap:contacts'],
-            functions: ['list_contacts', 'get_contact', 'search_contacts'],
-            note: session.capabilities['urn:ietf:params:jmap:contacts'] ? 
-              'Contacts are available' : 
+            functions: ['list_contacts', 'get_contact', 'search_contacts', 'create_contact', 'update_contact', 'delete_contact'],
+            note: session.capabilities['urn:ietf:params:jmap:contacts'] ?
+              'Contacts are available. Write tools (create/update/delete) additionally require the API token to have read-write contacts scope.' :
               'Contacts access not available - may require enabling in Fastmail account settings',
             enablementGuide: session.capabilities['urn:ietf:params:jmap:contacts'] ? null : {
               steps: [

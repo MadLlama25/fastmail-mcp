@@ -10,6 +10,8 @@ export interface JmapSession {
   capabilities: Record<string, any>;
   downloadUrl?: string;
   uploadUrl?: string;
+  /** Per-capability primary account ids (e.g. contacts may differ from mail). */
+  primaryAccounts?: Record<string, string>;
 }
 
 export interface JmapRequest {
@@ -243,7 +245,8 @@ export class JmapClient {
         || Object.keys(sessionData.accounts)[0],
       capabilities: sessionData.capabilities,
       downloadUrl: sessionData.downloadUrl,
-      uploadUrl: sessionData.uploadUrl
+      uploadUrl: sessionData.uploadUrl,
+      primaryAccounts: sessionData.primaryAccounts,
     };
 
     return this.session;
