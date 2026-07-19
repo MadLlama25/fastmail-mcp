@@ -44,3 +44,36 @@ export function validateFastmailUrl(input: string, fieldName: string, allowUnsaf
 }
 
 export const FASTMAIL_ALLOWED_HOSTS_FOR_TEST = FASTMAIL_ALLOWED_HOSTS;
+
+/**
+ * Validate a user-configured HTTPS endpoint (e.g. the WebDAV base URL).
+ *
+ * Unlike validateFastmailUrl there is deliberately NO host allowlist — the
+ * host being user-chosen is the point (Fastmail Files, Nextcloud, ...), and
+ * the value comes from server env, never from tool arguments. Enforced:
+ *   - HTTPS only (credentials travel with every request).
+ *   - No embedded userinfo (credentials belong in the Authorization header,
+ *     not in a URL that ends up in logs and error messages).
+ *   - No query or fragment (a collection URL has neither; their presence
+ *     signals a copy-paste mistake or something more creative).
+ *
+ * Throws on rejection; returns the parsed URL on success.
+ */
+export function validateHttpsUrl(input: string, fieldName: string): URL {
+  let parsed: URL;
+  try {
+    parsed = new URL(input);
+  } catch {
+    throw new Error(`${fieldName} is not a valid URL`);
+  }
+  if (parsed.protocol !== 'https:') {
+    throw new Error(`${fieldName} must use HTTPS (got: ${parsed.protocol}).`);
+  }
+  if (parsed.username || parsed.password) {
+    throw new Error(`${fieldName} must not embed credentials in the URL; use the username/password settings.`);
+  }
+  if (parsed.search || parsed.hash) {
+    throw new Error(`${fieldName} must be a plain collection URL without query or fragment.`);
+  }
+  return parsed;
+}
