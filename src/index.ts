@@ -207,7 +207,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'list_emails',
-        description: 'List emails from a mailbox',
+        description: 'List emails from a mailbox. When the server reports a total match count, results are wrapped in a {"total", "items"} JSON envelope; otherwise a bare JSON array is returned.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -229,7 +229,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'list_emails_metadata',
-        description: 'Same as list_emails (lists emails from a mailbox, optionally filtered by mailboxId, with paging and sort) but returns ONLY metadata fields on each result — id, threadId, subject, from, to, replyTo, receivedAt, hasAttachment, keywords. Does NOT return preview or any body-derived content. Use in privacy-sensitive flows where the workflow needs only the envelope (e.g. customer-mail least-privilege scans, or any caller forbidden from ingesting message bodies). Pair with get_email_metadata for follow-up lookups that should also stay header-only.',
+        description: 'Same as list_emails (lists emails from a mailbox, optionally filtered by mailboxId, with paging and sort) but returns ONLY metadata fields on each result — id, threadId, subject, from, to, replyTo, receivedAt, hasAttachment, keywords. Does NOT return preview or any body-derived content. Use in privacy-sensitive flows where the workflow needs only the envelope (e.g. customer-mail least-privilege scans, or any caller forbidden from ingesting message bodies). Pair with get_email_metadata for follow-up lookups that should also stay header-only. When the server reports a total match count, results are wrapped in a {"total", "items"} JSON envelope; otherwise a bare JSON array is returned.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -527,7 +527,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: 'search_emails',
         description:
-          'Full-text search of email body and subject. Does not filter by sender, recipient, or date — use advanced_search for field-specific filtering. Drafts are included by default; set excludeDrafts=true to omit draft messages from results.',
+          'Full-text search of email body and subject. Does not filter by sender, recipient, or date — use advanced_search for field-specific filtering. Drafts are included by default; set excludeDrafts=true to omit draft messages from results. When the server reports a total match count, results are wrapped in a {"total", "items"} JSON envelope; otherwise a bare JSON array is returned.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -554,7 +554,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'search_emails_metadata',
-        description: 'Same as search_emails (free-text search across subject and body) but returns ONLY metadata on each match — id, threadId, subject, from, to, replyTo, receivedAt, hasAttachment, keywords. The query still searches body text on the server side; only the result envelopes come back, never preview or body excerpts. Use when a content match is required (e.g. "find all messages mentioning X") but the matches must not surface body fragments to the caller.',
+        description: 'Same as search_emails (free-text search across subject and body) but returns ONLY metadata on each match — id, threadId, subject, from, to, replyTo, receivedAt, hasAttachment, keywords. The query still searches body text on the server side; only the result envelopes come back, never preview or body excerpts. Use when a content match is required (e.g. "find all messages mentioning X") but the matches must not surface body fragments to the caller. When the server reports a total match count, results are wrapped in a {"total", "items"} JSON envelope; otherwise a bare JSON array is returned.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -577,7 +577,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'list_contacts',
-        description: 'List contacts from the address book',
+        description: 'List contacts from the address book. When the server reports a total match count, results are wrapped in a {"total", "items"} JSON envelope; otherwise a bare JSON array is returned.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -605,7 +605,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'search_contacts',
-        description: 'Search contacts by name or email',
+        description: 'Search contacts by name or email. When the server reports a total match count, results are wrapped in a {"total", "items"} JSON envelope; otherwise a bare JSON array is returned.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -795,7 +795,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'get_recent_emails',
-        description: 'Get the most recent emails across all mailboxes except Trash and Spam (pass mailboxName to scope to one folder, e.g. "inbox")',
+        description: 'Get the most recent emails across all mailboxes except Trash and Spam (pass mailboxName to scope to one folder, e.g. "inbox"). When the server reports a total match count, results are wrapped in a {"total", "items"} JSON envelope; otherwise a bare JSON array is returned.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -979,7 +979,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'advanced_search',
-        description: 'Advanced email search with multiple criteria. Mailbox scoping supports a single mailbox (mailboxId), an intersection of multiple mailboxes (requiredMailboxIds — must be a member of ALL listed mailboxes), and exclusion (excludeMailboxIds — member of NONE of the listed mailboxes), alongside the standard sender / recipient / subject / free-text / date / attachment / unread / pinned filters.',
+        description: 'Advanced email search with multiple criteria. Mailbox scoping supports a single mailbox (mailboxId), an intersection of multiple mailboxes (requiredMailboxIds — must be a member of ALL listed mailboxes), and exclusion (excludeMailboxIds — member of NONE of the listed mailboxes), alongside the standard sender / recipient / subject / free-text / date / attachment / unread / pinned filters. When the server reports a total match count, results are wrapped in a {"total", "items"} JSON envelope; otherwise a bare JSON array is returned.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -1047,7 +1047,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'advanced_search_metadata',
-        description: 'Same filter capabilities as advanced_search (single-mailbox scoping via mailboxId, multi-mailbox intersection via requiredMailboxIds, exclusion via excludeMailboxIds, plus sender / recipient / subject / free text / date / attachment / unread / pinned) but returns ONLY metadata on each match — id, threadId, subject, from, to, cc, replyTo, receivedAt, hasAttachment, keywords. Does NOT return preview or any body-derived content. Use in privacy-sensitive flows where the routing decision is made from headers alone — for example, when classifying customer mail by sender / recipient / subject / thread state without ingesting body content. The free-text query still searches body content on the server side; only the result envelope comes back without body excerpts.',
+        description: 'Same filter capabilities as advanced_search (single-mailbox scoping via mailboxId, multi-mailbox intersection via requiredMailboxIds, exclusion via excludeMailboxIds, plus sender / recipient / subject / free text / date / attachment / unread / pinned) but returns ONLY metadata on each match — id, threadId, subject, from, to, cc, replyTo, receivedAt, hasAttachment, keywords. Does NOT return preview or any body-derived content. Use in privacy-sensitive flows where the routing decision is made from headers alone — for example, when classifying customer mail by sender / recipient / subject / thread state without ingesting body content. The free-text query still searches body content on the server side; only the result envelope comes back without body excerpts. When the server reports a total match count, results are wrapped in a {"total", "items"} JSON envelope; otherwise a bare JSON array is returned.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -1391,12 +1391,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'list_emails_metadata': {
         const { mailboxId, limit, ascending } = (args ?? {}) as any;
         const validLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
-        const emails = await client.getEmailsMetadata(mailboxId, validLimit, !!ascending);
+        const result = await client.getEmailsMetadata(mailboxId, validLimit, !!ascending);
         return {
           content: [
             {
               type: 'text',
-              text: JSON.stringify(emails, null, 2),
+              text: formatQueryResult(result),
             },
           ],
         };
@@ -1659,12 +1659,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           throw new McpError(ErrorCode.InvalidParams, 'query is required');
         }
         const validLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
-        const emails = await client.searchEmailsMetadata(query, validLimit, !!ascending);
+        const result = await client.searchEmailsMetadata(query, validLimit, !!ascending);
         return {
           content: [
             {
               type: 'text',
-              text: JSON.stringify(emails, null, 2),
+              text: formatQueryResult(result),
             },
           ],
         };
@@ -2050,14 +2050,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const { query, from, to, subject, hasAttachment, isUnread, isPinned, mailboxId, requiredMailboxIds, excludeMailboxIds, after, before, limit, ascending } = (args ?? {}) as any;
         const client = initializeClient();
         const validLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
-        const emails = await client.advancedSearchMetadata({
+        const result = await client.advancedSearchMetadata({
           query, from, to, subject, hasAttachment, isUnread, isPinned, mailboxId, requiredMailboxIds, excludeMailboxIds, after, before, limit: validLimit, ascending
         });
         return {
           content: [
             {
               type: 'text',
-              text: JSON.stringify(emails, null, 2),
+              text: formatQueryResult(result),
             },
           ],
         };
