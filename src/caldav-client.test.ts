@@ -622,6 +622,46 @@ describe('CalDAVCalendarClient.deleteCalendarEvent', () => {
   });
 });
 
+describe('CalDAVCalendarClient.getCalendarEventById', () => {
+  function createMockedClientWithObjects(calendarObjects: Array<{ data: string; url: string; etag?: string }>) {
+    const client = new CalDAVCalendarClient({ username: 'test', password: 'test' });
+    const mockDAVClient = {
+      login: mock.fn(async () => {}),
+      fetchCalendars: mock.fn(async () => [
+        { displayName: 'Personal', url: '/cal/personal/' },
+      ]),
+      fetchCalendarObjects: mock.fn(async () => calendarObjects),
+    };
+    (client as any).client = mockDAVClient;
+    return { client, mockDAVClient };
+  }
+
+  it('returns the parsed event when the UID exists', async () => {
+    const ical = [
+      'BEGIN:VCALENDAR',
+      'BEGIN:VEVENT',
+      'UID:get1@fm',
+      'DTSTART:20260401T100000Z',
+      'SUMMARY:Findable',
+      'END:VEVENT',
+      'END:VCALENDAR',
+    ].join('\r\n');
+    const { client } = createMockedClientWithObjects([{ data: ical, url: '/cal/get1.ics', etag: '"etag1"' }]);
+
+    const event = await client.getCalendarEventById('get1@fm');
+    assert.equal(event.id, 'get1@fm');
+    assert.equal(event.title, 'Findable');
+  });
+
+  it('throws instead of returning null when the event does not exist', async () => {
+    const { client } = createMockedClientWithObjects([]);
+    await assert.rejects(
+      () => client.getCalendarEventById('nonexistent@fm'),
+      /Calendar event not found: nonexistent@fm/
+    );
+  });
+});
+
 // ============================================================
 // New tests for calendar attendee support & non-destructive updates
 // ============================================================
