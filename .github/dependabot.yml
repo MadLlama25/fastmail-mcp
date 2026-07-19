@@ -22,3 +22,9 @@ updates:
         dependency-type: production
       development:
         dependency-type: development
+    ignore:
+      # @types/node tracks the minimum supported runtime (engines >=20), not
+      # the newest Node — a newer major would let code typecheck against APIs
+      # that don't exist on the oldest supported Node.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
