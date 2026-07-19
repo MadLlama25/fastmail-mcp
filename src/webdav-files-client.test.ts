@@ -1,6 +1,6 @@
 import { describe, it, mock } from 'node:test';
 import assert from 'node:assert/strict';
-import { WebDAVFilesClient, sanitizeRemotePath } from './webdav-files-client.js';
+import { WebDAVFilesClient, sanitizeRemotePath, filesAvailabilitySection } from './webdav-files-client.js';
 import { validateHttpsUrl } from './url-validation.js';
 
 // ---------- sanitizeRemotePath ----------
@@ -146,5 +146,31 @@ describe('WebDAVFilesClient.uploadBuffer', () => {
     await assert.rejects(() => client.uploadBuffer(Buffer.from('x'), '../escape.txt'), /must not contain|relative/);
     assert.equal(dav.createObject.mock.calls.length, 0);
     assert.equal(dav.davRequest.mock.calls.length, 0);
+  });
+});
+
+// ---------- filesAvailabilitySection ----------
+
+describe('filesAvailabilitySection', () => {
+  it('reports available with no guide when configured and healthy', () => {
+    const s = filesAvailabilitySection(true);
+    assert.equal(s.available, true);
+    assert.deepEqual(s.functions, ['save_attachment_to_webdav']);
+    assert.equal(s.enablementGuide, null);
+    assert.match(s.note, /configured/);
+  });
+
+  it('reports unavailable with setup guide when unconfigured', () => {
+    const s = filesAvailabilitySection(false);
+    assert.equal(s.available, false);
+    assert.match(s.note, /not configured/);
+    assert.ok(s.enablementGuide && s.enablementGuide.steps.some((x) => x.includes('myfiles.fastmail.com')));
+  });
+
+  it('configured-but-broken reports unavailable with the error, not a throw', () => {
+    const s = filesAvailabilitySection(true, 'FASTMAIL_WEBDAV_URL must use HTTPS (got: http:).');
+    assert.equal(s.available, false);
+    assert.match(s.note, /invalid.*HTTPS/s);
+    assert.ok(s.enablementGuide, 'broken config should still include the guide');
   });
 });

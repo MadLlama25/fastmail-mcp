@@ -65,6 +65,40 @@ export function sanitizeRemotePath(remotePath: string): string[] {
   return segments;
 }
 
+/**
+ * Build the `files` section for check_function_availability. Pure so it can be
+ * unit-tested without importing the server entry point (which starts the
+ * server on import). `errorNote` carries a configuration error (e.g. a
+ * malformed FASTMAIL_WEBDAV_URL) — configured-but-broken reports unavailable
+ * with the reason rather than throwing the whole availability call.
+ */
+export function filesAvailabilitySection(configured: boolean, errorNote?: string): {
+  available: boolean;
+  functions: string[];
+  note: string;
+  enablementGuide: { steps: string[]; documentation: string } | null;
+} {
+  const available = configured && !errorNote;
+  return {
+    available,
+    functions: ['save_attachment_to_webdav'],
+    note: available
+      ? 'WebDAV file storage is configured (FASTMAIL_WEBDAV_URL)'
+      : errorNote
+        ? `WebDAV storage configuration is invalid: ${errorNote}`
+        : 'WebDAV file storage not configured - set FASTMAIL_WEBDAV_URL, FASTMAIL_WEBDAV_USERNAME, and FASTMAIL_WEBDAV_PASSWORD',
+    enablementGuide: available ? null : {
+      steps: [
+        '1. For Fastmail Files: set FASTMAIL_WEBDAV_URL=https://myfiles.fastmail.com/',
+        '2. Create an app password with the Files scope (Settings → Privacy & Security → App passwords)',
+        '3. Set FASTMAIL_WEBDAV_USERNAME (your account email) and FASTMAIL_WEBDAV_PASSWORD (the app password)',
+        '4. Any other WebDAV server works too — point FASTMAIL_WEBDAV_URL at its HTTPS collection URL',
+      ],
+      documentation: 'https://www.fastmail.com/help/files/davnav.html',
+    },
+  };
+}
+
 export class WebDAVFilesClient {
   private config: WebDAVConfig;
   private headers: Record<string, string>;
