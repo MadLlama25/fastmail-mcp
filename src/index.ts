@@ -18,7 +18,7 @@ import { coerceRecipients, coerceStringArray, coerceBool, redactBearerTokens, re
 const server = new Server(
   {
     name: 'fastmail-mcp',
-    version: '1.13.2',
+    version: '1.13.3',
   },
   {
     capabilities: {
