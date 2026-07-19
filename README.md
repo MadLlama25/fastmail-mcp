@@ -170,6 +170,7 @@ You can install this server as a Desktop Extension for Claude Desktop using the 
 - **search_emails**: Search emails by content
   - Parameters: `query` (required), `limit` (default: 20, max: 100), `ascending` (optional, oldest first), `excludeDrafts` (optional, omit draft messages)
   - Drafts are **included by default**. Set `excludeDrafts: true` to filter them out server-side.
+  - Searches **all mailboxes including Trash and Spam**. For cleanup/verification flows, exclude the Trash mailbox explicitly (e.g. `advanced_search` with `excludeMailboxIds`) rather than trusting a bare search count.
 - **get_recent_emails**: Get the most recent emails (inspired by JMAP-Samples top-ten)
   - Parameters: `limit` (default: 10, max: 50), `mailboxName` (optional), `ascending` (optional, oldest first)
   - When `mailboxName` is omitted, all mailboxes are searched **except Trash and Spam**. Pass a mailbox name (e.g. `'inbox'`, `'sent'`) to scope to one folder.
@@ -202,6 +203,7 @@ You can install this server as a Desktop Extension for Claude Desktop using the 
   - The storage server and credentials come from `FASTMAIL_WEBDAV_*` env config; the tool only chooses the relative path beneath that base. Existing files are never replaced unless `overwrite: true`.
 - **advanced_search**: Advanced email search with multiple criteria
   - Parameters: `query` (optional), `from` (optional), `to` (optional), `subject` (optional), `hasAttachment` (optional), `isUnread` (optional), `isPinned` (optional), `mailboxId` (optional), `requiredMailboxIds` (optional array — email must be in ALL of these), `excludeMailboxIds` (optional array — exclude emails in any of these), `after` (optional), `before` (optional), `limit` (default: 50, max: 100), `ascending` (optional, oldest first)
+  - Like `search_emails`, searches **all mailboxes including Trash and Spam** — scope with `mailboxId`/`excludeMailboxIds` when that matters. (`get_recent_emails` is the one that excludes Trash/Spam by default.)
 - **advanced_search_metadata**: Same filters as `advanced_search`, metadata-only results (no body content)
 - **get_thread**: Get all emails in a conversation thread
   - Parameters: `threadId` (required), `includeDrafts` (optional, include in-progress drafts)

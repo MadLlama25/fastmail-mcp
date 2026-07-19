@@ -11,7 +11,7 @@ import { FastmailAuth, FastmailConfig } from './auth.js';
 import { JmapClient, QueryResult } from './jmap-client.js';
 import { ContactsCalendarClient } from './contacts-calendar.js';
 import { CalDAVCalendarClient } from './caldav-client.js';
-import { WebDAVFilesClient } from './webdav-files-client.js';
+import { WebDAVFilesClient, filesAvailabilitySection } from './webdav-files-client.js';
 import { validateHttpsUrl } from './url-validation.js';
 import { coerceRecipients, coerceStringArray, coerceBool, redactBearerTokens, registerSecret } from './coerce.js';
 
@@ -2649,6 +2649,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               documentation: 'https://www.fastmail.com/help/technical/jmap-api.html'
             }
           },
+          files: (() => {
+            // A malformed configured URL makes initializeWebDAVClient throw —
+            // availability must report that, not fail the whole call.
+            try {
+              return filesAvailabilitySection(initializeWebDAVClient() !== null);
+            } catch (e) {
+              return filesAvailabilitySection(true, e instanceof Error ? redactBearerTokens(e.message) : String(e));
+            }
+          })(),
           capabilities: Object.keys(session.capabilities)
         };
         
