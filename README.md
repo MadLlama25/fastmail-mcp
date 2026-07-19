@@ -1,6 +1,8 @@
-# Fastmail MCP Server
+# Fastmail MCP Server (Unofficial)
 
-A Model Context Protocol (MCP) server that provides access to the Fastmail API, enabling AI assistants to interact with email, contacts, and calendar data.
+An **unofficial** Model Context Protocol (MCP) server that provides access to the Fastmail API, enabling AI assistants to interact with email, contacts, and calendar data.
+
+> **Disclaimer:** This is a community project. It is **not affiliated with, endorsed by, or supported by Fastmail**. "Fastmail" is a trademark of Fastmail Pty Ltd; it is used here only to describe compatibility with their public JMAP/CalDAV/WebDAV APIs. Use at your own risk under the terms of the project license.
 
 ## Features
 
