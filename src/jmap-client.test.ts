@@ -605,7 +605,7 @@ describe('JMAP response validation', () => {
         ['error', { type: 'serverFail', description: 'oops' }, 'query'],
       ],
     });
-    // getEmails uses getListResult(response, 1) but only 1 response exists
+    // getEmails uses getQueryResult(response, 0, 1) and the error sits at index 0
     await assert.rejects(
       () => client.getEmails(undefined, 10),
       (err: Error) => {
