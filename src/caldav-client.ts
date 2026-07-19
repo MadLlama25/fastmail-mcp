@@ -47,6 +47,18 @@ export interface CalendarEvent {
  * Extract the VEVENT block from iCalendar data.
  * This avoids matching properties from VTIMEZONE or other components.
  */
+/**
+ * Resolve the ORGANIZER display name from a raw env value, falling back when
+ * it is unset, blank, or an unresolved DXT config placeholder like
+ * "${user_config.fastmail_caldav_display_name}" — a raw process.env read here
+ * would otherwise embed the literal placeholder into generated iCal.
+ */
+export function resolveDisplayName(raw: string | undefined, fallback: string): string {
+  const trimmed = raw?.trim();
+  if (!trimmed || /\$\{[^}]+\}/.test(trimmed)) return fallback;
+  return trimmed;
+}
+
 export function extractVEvent(data: string): string | null {
   const match = data.match(/BEGIN:VEVENT[\s\S]*?END:VEVENT/);
   return match ? match[0] : null;
@@ -1176,7 +1188,7 @@ export class CalDAVCalendarClient {
       // into the ORGANIZER line when embedded below.
       const caldavUsername = this.config.username;
       validateAttendeeEmail(caldavUsername);
-      const displayName = process.env.FASTMAIL_CALDAV_DISPLAY_NAME || caldavUsername;
+      const displayName = resolveDisplayName(process.env.FASTMAIL_CALDAV_DISPLAY_NAME, caldavUsername);
       const cnPart = `;CN=${quoteParamValue(displayName)}`;
       icalLines.push(foldICalLine(`ORGANIZER${cnPart}:mailto:${caldavUsername}`));
 
@@ -1429,7 +1441,7 @@ export class CalDAVCalendarClient {
         if (!caldavUsername.includes('@')) {
           throw new Error('Cannot add participants: CalDAV username is not an email address, required for ORGANIZER');
         }
-        const displayName = process.env.FASTMAIL_CALDAV_DISPLAY_NAME || caldavUsername;
+        const displayName = resolveDisplayName(process.env.FASTMAIL_CALDAV_DISPLAY_NAME, caldavUsername);
         const cnPart = displayName ? `;CN=${quoteParamValue(displayName)}` : '';
         data = replaceICalProperty(data, 'ORGANIZER', fold(`ORGANIZER${cnPart}:mailto:${caldavUsername}`));
       }
