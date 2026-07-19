@@ -2,28 +2,33 @@
 # The runtime entry point is dist/index.js, so source and tests must NOT ship —
 # this is what prevents a test fixture (or any source-only data) from ever being
 # published inside a release binary.
+#
+# IMPORTANT: directory patterns are ROOT-ANCHORED (leading slash). An unanchored
+# "src/" matches at any depth and once stripped node_modules/debug/src/ — the
+# entry point of a runtime dependency — producing a .dxt that crashed on boot.
+# Anchor anything that should only match the repository root.
 
 # Source & tests (compiled output lives in dist/)
-src/
+/src/
 *.test.ts
 *.test.js
 *.test.mjs
 
 # Local/live test scripts (also gitignored)
-test-live*
-.secret-scan-local.txt
+/test-live*
+/.secret-scan-local.txt
 
 # Tooling / CI / repo scaffolding — not needed at runtime
-scripts/
-.github/
-.githooks/
-.gitignore
-.dxtignore
-.mcp.json
-tsconfig.json
+/scripts/
+/.github/
+/.githooks/
+/.gitignore
+/.dxtignore
+/.mcp.json
+/tsconfig.json
 .env
 .env.*
 
 # Dev docs / meta
-CLAUDE.md
-.secret-scan-local.txt.example
+/CLAUDE.md
+/.secret-scan-local.txt.example
