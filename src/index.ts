@@ -11,6 +11,8 @@ import { FastmailAuth, FastmailConfig } from './auth.js';
 import { JmapClient, QueryResult } from './jmap-client.js';
 import { ContactsCalendarClient } from './contacts-calendar.js';
 import { CalDAVCalendarClient } from './caldav-client.js';
+import { WebDAVFilesClient } from './webdav-files-client.js';
+import { validateHttpsUrl } from './url-validation.js';
 import { coerceRecipients, coerceStringArray, coerceBool, redactBearerTokens, registerSecret } from './coerce.js';
 
 const server = new Server(
@@ -121,6 +123,36 @@ function initializeCalDAVClient(): CalDAVCalendarClient | null {
 
   caldavClient = new CalDAVCalendarClient({ username, password });
   return caldavClient;
+}
+
+let webdavClient: WebDAVFilesClient | null = null;
+
+function initializeWebDAVClient(): WebDAVFilesClient | null {
+  if (webdavClient) return webdavClient;
+
+  const baseUrl = findEnvValue([
+    'FASTMAIL_WEBDAV_URL',
+    'USER_CONFIG_FASTMAIL_WEBDAV_URL',
+  ]).value;
+  const username = findEnvValue([
+    'FASTMAIL_WEBDAV_USERNAME',
+    'USER_CONFIG_FASTMAIL_WEBDAV_USERNAME',
+  ]).value;
+  const password = findEnvValue([
+    'FASTMAIL_WEBDAV_PASSWORD',
+    'USER_CONFIG_FASTMAIL_WEBDAV_PASSWORD',
+  ]).value;
+
+  if (!baseUrl || !username || !password) return null;
+
+  // The base URL is server config, never a tool argument — tools may only
+  // supply relative paths beneath it. HTTPS-only, no embedded credentials.
+  validateHttpsUrl(baseUrl, 'FASTMAIL_WEBDAV_URL');
+  registerSecret(password);
+  registerSecret(username);
+
+  webdavClient = new WebDAVFilesClient({ baseUrl, username, password });
+  return webdavClient;
 }
 
 function getDownloadDir(): string | undefined {
@@ -1035,6 +1067,36 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
           },
           required: ['emailId', 'attachmentId'],
+        },
+      },
+      {
+        name: 'save_attachment_to_webdav',
+        description: 'Save an email attachment directly to WebDAV cloud storage (e.g. Fastmail Files or Nextcloud) without touching local disk. The storage server and credentials come from server configuration (FASTMAIL_WEBDAV_URL / _USERNAME / _PASSWORD); this tool only chooses the relative path beneath that base. Fails if the remote file exists unless overwrite is set.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            emailId: {
+              type: 'string',
+              description: 'ID of the email',
+            },
+            attachmentId: {
+              type: 'string',
+              description: 'Attachment partId, blobId, or zero-based index',
+            },
+            remotePath: {
+              type: 'string',
+              description: 'Relative path under the configured WebDAV base (e.g. "invoices/2026/receipt.pdf"). No leading slash, no "..", forward slashes only. Missing parent folders are created unless createParents is false.',
+            },
+            overwrite: {
+              type: 'boolean',
+              description: 'Replace an existing remote file (default false: fail if it exists)',
+            },
+            createParents: {
+              type: 'boolean',
+              description: 'Create missing parent collections via MKCOL (default true)',
+            },
+          },
+          required: ['emailId', 'attachmentId', 'remotePath'],
         },
       },
       {
@@ -2095,6 +2157,35 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             'Attachment download failed. Verify emailId and attachmentId and try again.'
           );
         }
+      }
+
+      case 'save_attachment_to_webdav': {
+        const { emailId, attachmentId, remotePath, overwrite, createParents } = args as any;
+        if (!emailId || !attachmentId) {
+          throw new McpError(ErrorCode.InvalidParams, 'emailId and attachmentId are required');
+        }
+        if (!remotePath) {
+          throw new McpError(ErrorCode.InvalidParams, 'remotePath is required');
+        }
+        const dav = initializeWebDAVClient();
+        if (!dav) {
+          throw new McpError(ErrorCode.InvalidRequest, 'WebDAV storage not configured. Set FASTMAIL_WEBDAV_URL, FASTMAIL_WEBDAV_USERNAME, and FASTMAIL_WEBDAV_PASSWORD (for Fastmail Files use https://myfiles.fastmail.com/ with a Files-scoped app password).');
+        }
+        const client = initializeClient();
+        const { buffer, type, name } = await client.fetchAttachmentBuffer(emailId, attachmentId);
+        const result = await dav.uploadBuffer(buffer, remotePath, {
+          contentType: type,
+          overwrite: coerceBool(overwrite) ?? false,
+          createParents: coerceBool(createParents) ?? true,
+        });
+        return {
+          content: [
+            {
+              type: 'text',
+              text: redactBearerTokens(JSON.stringify({ ...result, attachmentName: name }, null, 2)),
+            },
+          ],
+        };
       }
 
       case 'advanced_search': {
