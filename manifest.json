@@ -1,8 +1,8 @@
 {
   "dxt_version": "0.1",
   "name": "fastmail-mcp",
-  "version": "1.12.0",
-  "description": "MCP server for Fastmail API integration",
+  "version": "1.13.0",
+  "description": "Unofficial MCP server for Fastmail API integration (not affiliated with or endorsed by Fastmail)",
   "author": {
     "name": "Jeremy Gill"
   },
@@ -40,6 +40,38 @@
       "title": "Attachment Download Directory",
       "type": "string",
       "description": "Directory for saving email attachments (defaults to ~/Downloads/fastmail-mcp/). Path traversal protection is enforced within this directory.",
+      "required": false
+    },
+    "fastmail_caldav_username": {
+      "title": "CalDAV Username",
+      "type": "string",
+      "description": "Fastmail account email, for calendar tools via CalDAV (optional)",
+      "required": false
+    },
+    "fastmail_caldav_password": {
+      "title": "CalDAV App Password",
+      "type": "string",
+      "description": "App-specific password with Calendars scope (Settings -> Privacy & Security -> App passwords). Optional; calendar tools are disabled without it.",
+      "sensitive": true,
+      "required": false
+    },
+    "fastmail_webdav_url": {
+      "title": "WebDAV Storage URL",
+      "type": "string",
+      "description": "HTTPS base URL of a WebDAV collection for save_attachment_to_webdav (e.g. https://myfiles.fastmail.com/ for Fastmail Files, or a Nextcloud files URL). Optional.",
+      "required": false
+    },
+    "fastmail_webdav_username": {
+      "title": "WebDAV Username",
+      "type": "string",
+      "description": "Username for the WebDAV storage server (for Fastmail Files: your account email)",
+      "required": false
+    },
+    "fastmail_webdav_password": {
+      "title": "WebDAV App Password",
+      "type": "string",
+      "description": "App password for the WebDAV storage server (for Fastmail Files: an app password with the Files scope)",
+      "sensitive": true,
       "required": false
     }
   },

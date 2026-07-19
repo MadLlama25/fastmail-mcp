@@ -1,6 +1,8 @@
-# Fastmail MCP Server
+# Fastmail MCP Server (Unofficial)
 
-A Model Context Protocol (MCP) server that provides access to the Fastmail API, enabling AI assistants to interact with email, contacts, and calendar data.
+An **unofficial** Model Context Protocol (MCP) server that provides access to the Fastmail API, enabling AI assistants to interact with email, contacts, and calendar data.
+
+> **Disclaimer:** This is a community project. It is **not affiliated with, endorsed by, or supported by Fastmail**. "Fastmail" is a trademark of Fastmail Pty Ltd; it is used here only to describe compatibility with their public JMAP/CalDAV/WebDAV APIs. Use at your own risk under the terms of the project license.
 
 ## Features
 
@@ -24,6 +26,7 @@ A Model Context Protocol (MCP) server that provides access to the Fastmail API, 
 - List all contacts with full contact information
 - Get specific contacts by ID
 - Search contacts by name or email
+- Create, update, and delete contacts (JMAP ContactCard/set; requires an API token with read-write contacts scope)
 
 ### Calendar Operations
 - List all calendars and calendar events
@@ -136,7 +139,7 @@ You can install this server as a Desktop Extension for Claude Desktop using the 
 
 3. Use any of the tools (e.g. `get_recent_emails`).
 
-## Available Tools (38 Total)
+## Available Tools (52 Total)
 
 **🎯 Most Popular Tools:**
 - **check_function_availability**: Check what's available and get setup guidance  
@@ -184,6 +187,9 @@ You can install this server as a Desktop Extension for Claude Desktop using the 
 - **download_attachment**: Download an email attachment. If savePath is provided, saves the file to disk and returns the file path and size. Otherwise returns a download URL.
   - Parameters: `emailId` (required), `attachmentId` (required), `savePath` (optional)
   - `savePath` may be absolute or relative. Relative paths (including a bare filename) resolve against the download directory, so an attachment lands there in one step. Absolute paths must fall within that directory; traversal or symlink escape outside it is rejected. To save directly into your own location, set `FASTMAIL_DOWNLOAD_DIR` to that root — confinement stays on, scoped to the directory you choose.
+- **save_attachment_to_webdav**: Save an attachment directly to WebDAV cloud storage (Fastmail Files, Nextcloud, ...) without touching local disk
+  - Parameters: `emailId` (required), `attachmentId` (required), `remotePath` (required, relative), `overwrite` (default false), `createParents` (default true)
+  - The storage server and credentials come from `FASTMAIL_WEBDAV_*` env config; the tool only chooses the relative path beneath that base. Existing files are never replaced unless `overwrite: true`.
 - **advanced_search**: Advanced email search with multiple criteria
   - Parameters: `query` (optional), `from` (optional), `to` (optional), `subject` (optional), `hasAttachment` (optional), `isUnread` (optional), `mailboxId` (optional), `after` (optional), `before` (optional), `limit` (default: 50), `ascending` (optional, oldest first)
 - **get_thread**: Get all emails in a conversation thread
@@ -217,6 +223,12 @@ You can install this server as a Desktop Extension for Claude Desktop using the 
   - Parameters: `contactId` (required)
 - **search_contacts**: Search contacts by name or email
   - Parameters: `query` (required), `limit` (default: 20)
+- **create_contact**: Create a new contact (requires read-write contacts scope on the API token)
+  - Parameters: `name` `{given, surname, full}`, `emails` `[{address, label}]`, `phones` `[{number, label}]`, `addresses` `[{full, label}]`, `notes`, `addressBookId` (all optional, but a name or one email is required)
+- **update_contact**: Update an existing contact — each provided field **wholly replaces** the stored value (`emails: []` removes all emails); unspecified fields are untouched
+  - Parameters: `contactId` (required), same fields as create, `expectState` (optional JMAP state precondition)
+- **delete_contact**: Permanently delete a contact (cannot be undone)
+  - Parameters: `contactId` (required), `expectState` (optional)
 
 ### Calendar Tools
 
@@ -282,6 +294,36 @@ However, Fastmail fully supports **CalDAV** for calendar access via `caldav.fast
    ```
 
 When these variables are set, all calendar tools are available. When they are not set, calendar tools will return an error with setup instructions.
+
+### WebDAV file storage (optional)
+
+`save_attachment_to_webdav` saves attachments straight to cloud storage. Configure the target (never supplied by tools at runtime — this is deliberate, so a misbehaving caller cannot redirect uploads):
+
+```bash
+# Fastmail Files:
+export FASTMAIL_WEBDAV_URL="https://myfiles.fastmail.com/"
+export FASTMAIL_WEBDAV_USERNAME="your-email@fastmail.com"
+export FASTMAIL_WEBDAV_PASSWORD="app-password-with-files-scope"
+
+# ...or any WebDAV server, e.g. Nextcloud:
+# export FASTMAIL_WEBDAV_URL="https://cloud.example.com/remote.php/dav/files/USERNAME/"
+```
+
+The URL must be HTTPS. Note: Fastmail Files ignores the WebDAV `If-None-Match` precondition, so the tool performs an explicit existence check before non-overwrite uploads.
+
+### Email attachments on send
+
+`send_email`, `create_draft`, `edit_draft`, and `reply_email` accept an `attachments` array. Each entry uses exactly one source:
+
+- `{ "localPath": "report.pdf" }` — a file inside `FASTMAIL_DOWNLOAD_DIR` (same confinement as downloads)
+- `{ "emailId": "...", "attachmentId": "..." }` — re-attach from an existing email (zero-copy: no bytes are transferred)
+- `{ "blobId": "...", "name": "...", "type": "..." }` — an already-uploaded JMAP blob
+
+Uploads respect the server's `maxSizeUpload` (~50 MB on Fastmail). Editing a draft preserves its existing attachments.
+
+### Contacts write scope
+
+`create_contact` / `update_contact` / `delete_contact` need the API token to have **read-write** contacts scope (Settings → Privacy & Security → API tokens). Read-only tokens keep the three read tools working and fail writes with a `forbidden` error.
 
 ## Development
 
