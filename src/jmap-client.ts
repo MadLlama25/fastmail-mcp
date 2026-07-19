@@ -1,6 +1,6 @@
 import { FastmailAuth } from './auth.js';
 import { validateFastmailUrl } from './url-validation.js';
-import { writeFile, mkdir, realpath, stat, lstat, unlink } from 'fs/promises';
+import { writeFile, mkdir, realpath, stat, lstat, unlink, readFile } from 'fs/promises';
 import { dirname, resolve, normalize, sep, basename, join } from 'path';
 import { homedir } from 'os';
 
@@ -133,6 +133,19 @@ export function buildEmailQueryFilter(filters: EmailQueryFilters): any {
 export interface QueryResult<T = any> {
   items: T[];
   total?: number;
+}
+
+/**
+ * Tool-facing attachment source. Exactly one of localPath, emailId(+attachmentId),
+ * or blobId must be set; name/type optionally override the inferred values.
+ */
+export interface AttachmentInput {
+  localPath?: string;
+  emailId?: string;
+  attachmentId?: string;
+  blobId?: string;
+  name?: string;
+  type?: string;
 }
 
 export class JmapClient {
@@ -519,6 +532,8 @@ export class JmapClient {
     inReplyTo?: string[];
     references?: string[];
     replyTo?: string[];
+    attachments?: AttachmentInput[];
+    downloadDir?: string;
   }): Promise<string> {
     const session = await this.getSession();
 
@@ -570,6 +585,12 @@ export class JmapClient {
     const sentMailboxIds: Record<string, boolean> = {};
     sentMailboxIds[sentMailbox.id] = true;
 
+    // Resolve attachment sources (upload local files, reuse existing blobs)
+    // before creating the email so a failed upload never leaves a draft behind.
+    const resolvedAttachments = email.attachments?.length
+      ? await this.resolveAttachments(email.attachments, email.downloadDir)
+      : undefined;
+
     const emailObject = {
       mailboxIds: initialMailboxIds,
       keywords: { $draft: true },
@@ -586,7 +607,11 @@ export class JmapClient {
       bodyValues: {
         ...(email.textBody && { text: { value: email.textBody } }),
         ...(email.htmlBody && { html: { value: email.htmlBody } })
-      }
+      },
+      // RFC 8621 §4.6 convenience property: the server assembles the final
+      // multipart bodyStructure from textBody/htmlBody/attachments itself.
+      // Never hand-build bodyStructure alongside these — mixing is forbidden.
+      ...(resolvedAttachments?.length && { attachments: resolvedAttachments }),
     };
 
     const request: JmapRequest = {
@@ -661,12 +686,14 @@ export class JmapClient {
     inReplyTo?: string[];
     references?: string[];
     replyTo?: string[];
+    attachments?: AttachmentInput[];
+    downloadDir?: string;
   }): Promise<string> {
     const session = await this.getSession();
 
     // Validate at least one meaningful field is present
-    if (!email.to?.length && !email.subject && !email.textBody && !email.htmlBody) {
-      throw new Error('At least one of to, subject, textBody, or htmlBody must be provided');
+    if (!email.to?.length && !email.subject && !email.textBody && !email.htmlBody && !email.attachments?.length) {
+      throw new Error('At least one of to, subject, textBody, htmlBody, or attachments must be provided');
     }
 
     // Get all identities to resolve from address
@@ -724,6 +751,10 @@ export class JmapClient {
         ...(email.htmlBody && { html: { value: email.htmlBody } })
       };
     }
+    if (email.attachments?.length) {
+      // RFC 8621 convenience property — server assembles bodyStructure.
+      emailObject.attachments = await this.resolveAttachments(email.attachments, email.downloadDir);
+    }
 
     const request: JmapRequest = {
       using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
@@ -763,6 +794,8 @@ export class JmapClient {
     htmlBody?: string;
     from?: string;
     replyTo?: string[];
+    attachments?: AttachmentInput[];
+    downloadDir?: string;
   }): Promise<string> {
     const session = await this.getSession();
 
@@ -773,8 +806,8 @@ export class JmapClient {
         ['Email/get', {
           accountId: session.accountId,
           ids: [emailId],
-          properties: ['id', 'subject', 'from', 'to', 'cc', 'bcc', 'replyTo', 'textBody', 'htmlBody', 'bodyValues', 'mailboxIds', 'keywords'],
-          bodyProperties: ['partId', 'blobId', 'type', 'size'],
+          properties: ['id', 'subject', 'from', 'to', 'cc', 'bcc', 'replyTo', 'textBody', 'htmlBody', 'bodyValues', 'mailboxIds', 'keywords', 'attachments'],
+          bodyProperties: ['partId', 'blobId', 'type', 'size', 'name', 'disposition', 'cid'],
           fetchTextBodyValues: true,
           fetchHTMLBodyValues: true,
         }, 'getEmail']
@@ -864,6 +897,23 @@ export class JmapClient {
         ...(textBodyValue && { text: { value: textBodyValue } }),
         ...(htmlBodyValue && { html: { value: htmlBodyValue } }),
       };
+    }
+
+    // Carry existing attachments into the recreated draft — the recreate used
+    // to silently strip them. Same-account blobIds are directly reusable, so
+    // this is metadata-only. Newly supplied attachments are appended.
+    const carriedAttachments = (existingEmail.attachments ?? []).map((att: any) => ({
+      blobId: att.blobId,
+      type: att.type || 'application/octet-stream',
+      name: att.name || 'attachment',
+      disposition: att.disposition || 'attachment',
+      ...(att.cid && { cid: att.cid }),
+    }));
+    const newAttachments = updates.attachments?.length
+      ? await this.resolveAttachments(updates.attachments, updates.downloadDir)
+      : [];
+    if (carriedAttachments.length || newAttachments.length) {
+      emailObject.attachments = [...carriedAttachments, ...newAttachments];
     }
 
     // Atomic create + destroy in a single Email/set call
@@ -1373,10 +1423,15 @@ export class JmapClient {
     return email?.attachments || [];
   }
 
-  async downloadAttachment(emailId: string, attachmentId: string): Promise<string> {
+  /**
+   * Resolve an attachment reference (partId, blobId, or array index) on an
+   * email to its metadata. Shared by the download path and by attach-on-send's
+   * zero-copy "reuse an existing attachment" source — same-account blobIds are
+   * directly valid in Email/set, so no bytes ever need to move for a forward.
+   */
+  async getAttachmentInfo(emailId: string, attachmentId: string): Promise<{ blobId: string; type: string; name: string; size?: number }> {
     const session = await this.getSession();
 
-    // Get the email with full attachment details
     const request: JmapRequest = {
       using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
       methodCalls: [
@@ -1397,7 +1452,7 @@ export class JmapClient {
     }
 
     // Find attachment by partId or by index
-    let attachment = email.attachments?.find((att: any) => 
+    let attachment = email.attachments?.find((att: any) =>
       att.partId === attachmentId || att.blobId === attachmentId
     );
 
@@ -1408,10 +1463,22 @@ export class JmapClient {
         attachment = email.attachments?.[index];
       }
     }
-    
+
     if (!attachment) {
       throw new Error('Attachment not found.');
     }
+
+    return {
+      blobId: attachment.blobId,
+      type: attachment.type || 'application/octet-stream',
+      name: attachment.name || 'attachment',
+      size: attachment.size,
+    };
+  }
+
+  async downloadAttachment(emailId: string, attachmentId: string): Promise<string> {
+    const session = await this.getSession();
+    const attachment = await this.getAttachmentInfo(emailId, attachmentId);
 
     // Get the download URL from session
     const downloadUrl = session.downloadUrl;
@@ -1423,8 +1490,8 @@ export class JmapClient {
     const url = downloadUrl
       .replace('{accountId}', session.accountId)
       .replace('{blobId}', attachment.blobId)
-      .replace('{type}', encodeURIComponent(attachment.type || 'application/octet-stream'))
-      .replace('{name}', encodeURIComponent(attachment.name || 'attachment'));
+      .replace('{type}', encodeURIComponent(attachment.type))
+      .replace('{name}', encodeURIComponent(attachment.name));
 
     // Re-validate the substituted URL before it's used to send the bearer token —
     // defends against a template whose placeholders were filled with values that
@@ -1520,11 +1587,12 @@ export class JmapClient {
     return safePath;
   }
 
-  async downloadAttachmentToFile(emailId: string, attachmentId: string, savePath: string, downloadDir?: string): Promise<{ url: string; bytesWritten: number; savedPath: string }> {
-    // First check + create the parent dir before the (slow) network fetch, to
-    // shrink the window in which a co-resident process could swap a checked
-    // directory for a symlink.
-    await JmapClient.safeWritePath(savePath, downloadDir);
+  /**
+   * Fetch an attachment's bytes into memory. Shared by the local-file download
+   * path and any consumer that needs the raw bytes (e.g. re-upload targets).
+   */
+  async fetchAttachmentBuffer(emailId: string, attachmentId: string): Promise<{ buffer: Buffer; url: string; blobId: string; type: string; name: string }> {
+    const info = await this.getAttachmentInfo(emailId, attachmentId);
     const url = await this.downloadAttachment(emailId, attachmentId);
 
     const response = await fetch(url, {
@@ -1539,7 +1607,15 @@ export class JmapClient {
       throw new Error(`Download failed: ${response.status} ${response.statusText}`);
     }
 
-    const buffer = Buffer.from(await response.arrayBuffer());
+    return { buffer: Buffer.from(await response.arrayBuffer()), url, ...info };
+  }
+
+  async downloadAttachmentToFile(emailId: string, attachmentId: string, savePath: string, downloadDir?: string): Promise<{ url: string; bytesWritten: number; savedPath: string }> {
+    // First check + create the parent dir before the (slow) network fetch, to
+    // shrink the window in which a co-resident process could swap a checked
+    // directory for a symlink.
+    await JmapClient.safeWritePath(savePath, downloadDir);
+    const { buffer, url } = await this.fetchAttachmentBuffer(emailId, attachmentId);
 
     // Re-validate immediately before writing (TOCTOU: the target may have been
     // swapped for a symlink during the fetch), then write with O_EXCL so we
@@ -1558,6 +1634,132 @@ export class JmapClient {
     }
 
     return { url, bytesWritten: buffer.length, savedPath: safePath };
+  }
+
+  /**
+   * Read-side counterpart of validateSavePath/safeWritePath: confine local
+   * attachment sources to the download directory. Lexical containment first,
+   * then realpath the EXISTING file and require the canonical location to stay
+   * under the canonical allowed dir — a symlink inside the dir pointing out
+   * (e.g. ~/Downloads/fastmail-mcp/link -> /etc/passwd) must not be readable.
+   */
+  static async validateReadPath(readPath: string, downloadDir?: string): Promise<string> {
+    const lexical = JmapClient.validateSavePath(readPath, downloadDir);
+    const allowedDir = downloadDir ? resolve(normalize(downloadDir)) : JmapClient.DEFAULT_DOWNLOADS_DIR;
+    let canonicalAllowed: string;
+    let canonicalFile: string;
+    try {
+      canonicalAllowed = await realpath(allowedDir);
+      canonicalFile = await realpath(lexical);
+    } catch {
+      throw new Error(`Attachment file not found: ${readPath}`);
+    }
+    if (!canonicalFile.startsWith(canonicalAllowed + sep) && canonicalFile !== canonicalAllowed) {
+      throw new Error(`Attachment path must resolve within ${allowedDir}. Received: ${readPath}`);
+    }
+    return canonicalFile;
+  }
+
+  // Minimal extension → MIME map for local attachment sources. Anything
+  // unknown ships as application/octet-stream; callers can override per-file.
+  static readonly MIME_BY_EXT: Record<string, string> = {
+    pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+    gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml', txt: 'text/plain',
+    md: 'text/markdown', csv: 'text/csv', json: 'application/json', html: 'text/html',
+    ics: 'text/calendar', eml: 'message/rfc822', zip: 'application/zip',
+    doc: 'application/msword', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    xls: 'application/vnd.ms-excel', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    ppt: 'application/vnd.ms-powerpoint', pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  };
+
+  /**
+   * Upload raw bytes to the account's JMAP blob endpoint. The uploadUrl
+   * template comes from the session (validated at session time) and is
+   * re-validated after substitution, mirroring the download path.
+   */
+  async uploadBlob(buffer: Buffer, type: string): Promise<{ blobId: string; type: string; size: number }> {
+    const session = await this.getSession();
+    if (!session.uploadUrl) {
+      throw new Error('Upload capability not available in session');
+    }
+    const maxSize = session.capabilities?.['urn:ietf:params:jmap:core']?.maxSizeUpload;
+    if (typeof maxSize === 'number' && buffer.length > maxSize) {
+      throw new Error(`Attachment is ${buffer.length} bytes; the server's upload limit is ${maxSize} bytes`);
+    }
+
+    const url = session.uploadUrl.replace('{accountId}', session.accountId);
+    validateFastmailUrl(url, 'uploadUrl', this.auth.getAllowUnsafe());
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': this.auth.getAuthHeaders()['Authorization'],
+        'Content-Type': type || 'application/octet-stream',
+      },
+      body: new Uint8Array(buffer),
+      // Same rationale as the download path: never follow a redirect with a
+      // token-bearing request.
+      redirect: 'error',
+    });
+
+    if (!response.ok) {
+      throw new Error(`Blob upload failed: ${response.status} ${response.statusText}`);
+    }
+
+    const result: any = await response.json();
+    if (!result?.blobId) {
+      throw new Error('Blob upload returned no blobId');
+    }
+    return { blobId: result.blobId, type: result.type || type, size: result.size ?? buffer.length };
+  }
+
+  /**
+   * Resolve tool-facing attachment inputs to RFC 8621 attachment parts.
+   * Exactly one source per entry:
+   *  - { localPath }             file confined to the download directory
+   *  - { emailId, attachmentId } zero-copy reuse of an existing attachment's blob
+   *  - { blobId, name, type }    a blob already uploaded to this account
+   */
+  async resolveAttachments(inputs: AttachmentInput[], downloadDir?: string): Promise<any[]> {
+    const parts: any[] = [];
+    for (const input of inputs) {
+      const sources = [input.localPath, input.emailId, input.blobId].filter((v) => v != null).length;
+      if (sources !== 1) {
+        throw new Error('Each attachment must specify exactly one source: localPath, emailId+attachmentId, or blobId');
+      }
+      if (input.blobId) {
+        parts.push({
+          blobId: input.blobId,
+          type: input.type || 'application/octet-stream',
+          name: input.name || 'attachment',
+          disposition: 'attachment',
+        });
+      } else if (input.emailId) {
+        if (!input.attachmentId) {
+          throw new Error('attachmentId is required when attaching from an existing email');
+        }
+        const info = await this.getAttachmentInfo(input.emailId, input.attachmentId);
+        parts.push({
+          blobId: info.blobId,
+          type: input.type || info.type,
+          name: input.name || info.name,
+          disposition: 'attachment',
+        });
+      } else {
+        const canonical = await JmapClient.validateReadPath(input.localPath!, downloadDir);
+        const buffer = await readFile(canonical);
+        const ext = canonical.split('.').pop()?.toLowerCase() ?? '';
+        const type = input.type || JmapClient.MIME_BY_EXT[ext] || 'application/octet-stream';
+        const uploaded = await this.uploadBlob(buffer, type);
+        parts.push({
+          blobId: uploaded.blobId,
+          type,
+          name: input.name || basename(canonical),
+          disposition: 'attachment',
+        });
+      }
+    }
+    return parts;
   }
 
   async advancedSearch(filters: EmailQueryFilters): Promise<QueryResult> {

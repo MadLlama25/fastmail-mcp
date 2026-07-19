@@ -347,6 +347,21 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               items: { type: 'string' },
               description: 'Reply-To email addresses (replies go here instead of to the sender)',
             },
+            attachments: {
+              type: 'array',
+              description: 'Files to attach. Each entry must use EXACTLY ONE source: localPath (a file inside the configured download directory), emailId + attachmentId (re-attach an attachment from an existing email — no bytes are copied), or blobId (an already-uploaded JMAP blob). Optional name/type override the inferred filename and MIME type.',
+              items: {
+                type: 'object',
+                properties: {
+                  localPath: { type: 'string', description: 'Path to a file within FASTMAIL_DOWNLOAD_DIR (relative paths resolve against it)' },
+                  emailId: { type: 'string', description: 'Source email ID (use with attachmentId)' },
+                  attachmentId: { type: 'string', description: 'Attachment partId, blobId, or zero-based index within the source email' },
+                  blobId: { type: 'string', description: 'An existing blob ID in this account' },
+                  name: { type: 'string', description: 'Override the attachment filename' },
+                  type: { type: 'string', description: 'Override the MIME type' },
+                },
+              },
+            },
           },
           required: ['to', 'subject'],
         },
@@ -396,6 +411,21 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: 'array',
               items: { type: 'string' },
               description: 'Reply-To email addresses (replies go here instead of to the sender)',
+            },
+            attachments: {
+              type: 'array',
+              description: 'Files to attach. Each entry must use EXACTLY ONE source: localPath (a file inside the configured download directory), emailId + attachmentId (re-attach an attachment from an existing email — no bytes are copied), or blobId (an already-uploaded JMAP blob). Optional name/type override the inferred filename and MIME type.',
+              items: {
+                type: 'object',
+                properties: {
+                  localPath: { type: 'string', description: 'Path to a file within FASTMAIL_DOWNLOAD_DIR (relative paths resolve against it)' },
+                  emailId: { type: 'string', description: 'Source email ID (use with attachmentId)' },
+                  attachmentId: { type: 'string', description: 'Attachment partId, blobId, or zero-based index within the source email' },
+                  blobId: { type: 'string', description: 'An existing blob ID in this account' },
+                  name: { type: 'string', description: 'Override the attachment filename' },
+                  type: { type: 'string', description: 'Override the MIME type' },
+                },
+              },
             },
           },
           required: ['originalEmailId'],
@@ -457,6 +487,21 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               items: { type: 'string' },
               description: 'Reply-To email addresses (replies go here instead of to the sender)',
             },
+            attachments: {
+              type: 'array',
+              description: 'Files to attach. Each entry must use EXACTLY ONE source: localPath (a file inside the configured download directory), emailId + attachmentId (re-attach an attachment from an existing email — no bytes are copied), or blobId (an already-uploaded JMAP blob). Optional name/type override the inferred filename and MIME type.',
+              items: {
+                type: 'object',
+                properties: {
+                  localPath: { type: 'string', description: 'Path to a file within FASTMAIL_DOWNLOAD_DIR (relative paths resolve against it)' },
+                  emailId: { type: 'string', description: 'Source email ID (use with attachmentId)' },
+                  attachmentId: { type: 'string', description: 'Attachment partId, blobId, or zero-based index within the source email' },
+                  blobId: { type: 'string', description: 'An existing blob ID in this account' },
+                  name: { type: 'string', description: 'Override the attachment filename' },
+                  type: { type: 'string', description: 'Override the MIME type' },
+                },
+              },
+            },
           },
         },
       },
@@ -505,6 +550,21 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: 'array',
               items: { type: 'string' },
               description: 'Reply-To email addresses (replies go here instead of to the sender)',
+            },
+            attachments: {
+              type: 'array',
+              description: 'Files to attach. Each entry must use EXACTLY ONE source: localPath (a file inside the configured download directory), emailId + attachmentId (re-attach an attachment from an existing email — no bytes are copied), or blobId (an already-uploaded JMAP blob). Optional name/type override the inferred filename and MIME type.',
+              items: {
+                type: 'object',
+                properties: {
+                  localPath: { type: 'string', description: 'Path to a file within FASTMAIL_DOWNLOAD_DIR (relative paths resolve against it)' },
+                  emailId: { type: 'string', description: 'Source email ID (use with attachmentId)' },
+                  attachmentId: { type: 'string', description: 'Attachment partId, blobId, or zero-based index within the source email' },
+                  blobId: { type: 'string', description: 'An existing blob ID in this account' },
+                  name: { type: 'string', description: 'Override the attachment filename' },
+                  type: { type: 'string', description: 'Override the MIME type' },
+                },
+              },
             },
           },
           required: ['emailId'],
@@ -1461,6 +1521,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           inReplyTo: coerceStringArray(inReplyTo),
           references: coerceStringArray(references),
           replyTo,
+          attachments: (args as any).attachments,
+          downloadDir: getDownloadDir(),
         });
 
         return {
@@ -1525,6 +1587,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           inReplyTo: inReplyToHeader,
           references: referencesHeader,
           replyTo,
+          attachments: (args as any).attachments,
+          downloadDir: getDownloadDir(),
         };
 
         if (!shouldSend) {
@@ -1571,6 +1635,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           inReplyTo: coerceStringArray(inReplyTo),
           references: coerceStringArray(references),
           replyTo,
+          attachments: (args as any).attachments,
+          downloadDir: getDownloadDir(),
         });
 
         const summary = [
@@ -1606,6 +1672,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           textBody,
           htmlBody,
           replyTo,
+          attachments: (args as any).attachments,
+          downloadDir: getDownloadDir(),
         });
 
         return {
