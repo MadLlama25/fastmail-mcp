@@ -1,6 +1,6 @@
 {
   "name": "fastmail-mcp",
-  "version": "1.13.2",
+  "version": "1.13.3",
   "description": "Unofficial MCP server for Fastmail API integration (not affiliated with or endorsed by Fastmail)",
   "main": "dist/index.js",
   "type": "module",
