@@ -8,7 +8,7 @@ import {
   McpError,
 } from '@modelcontextprotocol/sdk/types.js';
 import { FastmailAuth, FastmailConfig } from './auth.js';
-import { JmapClient } from './jmap-client.js';
+import { JmapClient, QueryResult } from './jmap-client.js';
 import { ContactsCalendarClient } from './contacts-calendar.js';
 import { CalDAVCalendarClient } from './caldav-client.js';
 import { coerceRecipients, coerceStringArray, coerceBool, redactBearerTokens, registerSecret } from './coerce.js';
@@ -16,7 +16,7 @@ import { coerceRecipients, coerceStringArray, coerceBool, redactBearerTokens, re
 const server = new Server(
   {
     name: 'fastmail-mcp',
-    version: '1.11.1',
+    version: '1.12.0',
   },
   {
     capabilities: {
@@ -139,6 +139,19 @@ function clampLimit(value: unknown, fallback: number, max: number): number {
   return Math.min(Math.max(Number(value) || fallback, 1), max);
 }
 
+// When the JMAP server reports a total match count (calculateTotal: true), wrap
+// the items in a { total, items } envelope so callers can tell a truncated page
+// from a complete result. Without a total the bare array is returned unchanged,
+// keeping output byte-identical for paths that never had one (CalDAV, contacts
+// fallback).
+function formatQueryResult(result: QueryResult): string {
+  const { items, total } = result;
+  if (total != null) {
+    return JSON.stringify({ total, items }, null, 2);
+  }
+  return JSON.stringify(items, null, 2);
+}
+
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [
@@ -194,7 +207,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'list_emails',
-        description: 'List emails from a mailbox',
+        description: 'List emails from a mailbox. When the server reports a total match count, results are wrapped in a {"total", "items"} JSON envelope; otherwise a bare JSON array is returned.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -216,7 +229,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'list_emails_metadata',
-        description: 'Same as list_emails (lists emails from a mailbox, optionally filtered by mailboxId, with paging and sort) but returns ONLY metadata fields on each result — id, threadId, subject, from, to, replyTo, receivedAt, hasAttachment, keywords. Does NOT return preview or any body-derived content. Use in privacy-sensitive flows where the workflow needs only the envelope (e.g. customer-mail least-privilege scans, or any caller forbidden from ingesting message bodies). Pair with get_email_metadata for follow-up lookups that should also stay header-only.',
+        description: 'Same as list_emails (lists emails from a mailbox, optionally filtered by mailboxId, with paging and sort) but returns ONLY metadata fields on each result — id, threadId, subject, from, to, replyTo, receivedAt, hasAttachment, keywords. Does NOT return preview or any body-derived content. Use in privacy-sensitive flows where the workflow needs only the envelope (e.g. customer-mail least-privilege scans, or any caller forbidden from ingesting message bodies). Pair with get_email_metadata for follow-up lookups that should also stay header-only. When the server reports a total match count, results are wrapped in a {"total", "items"} JSON envelope; otherwise a bare JSON array is returned.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -514,7 +527,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       {
         name: 'search_emails',
         description:
-          'Full-text search of email body and subject. Does not filter by sender, recipient, or date — use advanced_search for field-specific filtering. Drafts are included by default; set excludeDrafts=true to omit draft messages from results.',
+          'Full-text search of email body and subject. Does not filter by sender, recipient, or date — use advanced_search for field-specific filtering. Drafts are included by default; set excludeDrafts=true to omit draft messages from results. When the server reports a total match count, results are wrapped in a {"total", "items"} JSON envelope; otherwise a bare JSON array is returned.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -541,7 +554,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'search_emails_metadata',
-        description: 'Same as search_emails (free-text search across subject and body) but returns ONLY metadata on each match — id, threadId, subject, from, to, replyTo, receivedAt, hasAttachment, keywords. The query still searches body text on the server side; only the result envelopes come back, never preview or body excerpts. Use when a content match is required (e.g. "find all messages mentioning X") but the matches must not surface body fragments to the caller.',
+        description: 'Same as search_emails (free-text search across subject and body) but returns ONLY metadata on each match — id, threadId, subject, from, to, replyTo, receivedAt, hasAttachment, keywords. The query still searches body text on the server side; only the result envelopes come back, never preview or body excerpts. Use when a content match is required (e.g. "find all messages mentioning X") but the matches must not surface body fragments to the caller. When the server reports a total match count, results are wrapped in a {"total", "items"} JSON envelope; otherwise a bare JSON array is returned.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -564,7 +577,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'list_contacts',
-        description: 'List contacts from the address book',
+        description: 'List contacts from the address book. When the server reports a total match count, results are wrapped in a {"total", "items"} JSON envelope; otherwise a bare JSON array is returned.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -592,7 +605,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'search_contacts',
-        description: 'Search contacts by name or email',
+        description: 'Search contacts by name or email. When the server reports a total match count, results are wrapped in a {"total", "items"} JSON envelope; otherwise a bare JSON array is returned.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -782,7 +795,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'get_recent_emails',
-        description: 'Get the most recent emails across all mailboxes except Trash and Spam (pass mailboxName to scope to one folder, e.g. "inbox")',
+        description: 'Get the most recent emails across all mailboxes except Trash and Spam (pass mailboxName to scope to one folder, e.g. "inbox"). When the server reports a total match count, results are wrapped in a {"total", "items"} JSON envelope; otherwise a bare JSON array is returned.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -966,7 +979,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'advanced_search',
-        description: 'Advanced email search with multiple criteria. Mailbox scoping supports a single mailbox (mailboxId), an intersection of multiple mailboxes (requiredMailboxIds — must be a member of ALL listed mailboxes), and exclusion (excludeMailboxIds — member of NONE of the listed mailboxes), alongside the standard sender / recipient / subject / free-text / date / attachment / unread / pinned filters.',
+        description: 'Advanced email search with multiple criteria. Mailbox scoping supports a single mailbox (mailboxId), an intersection of multiple mailboxes (requiredMailboxIds — must be a member of ALL listed mailboxes), and exclusion (excludeMailboxIds — member of NONE of the listed mailboxes), alongside the standard sender / recipient / subject / free-text / date / attachment / unread / pinned filters. When the server reports a total match count, results are wrapped in a {"total", "items"} JSON envelope; otherwise a bare JSON array is returned.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -1034,7 +1047,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'advanced_search_metadata',
-        description: 'Same filter capabilities as advanced_search (single-mailbox scoping via mailboxId, multi-mailbox intersection via requiredMailboxIds, exclusion via excludeMailboxIds, plus sender / recipient / subject / free text / date / attachment / unread / pinned) but returns ONLY metadata on each match — id, threadId, subject, from, to, cc, replyTo, receivedAt, hasAttachment, keywords. Does NOT return preview or any body-derived content. Use in privacy-sensitive flows where the routing decision is made from headers alone — for example, when classifying customer mail by sender / recipient / subject / thread state without ingesting body content. The free-text query still searches body content on the server side; only the result envelope comes back without body excerpts.',
+        description: 'Same filter capabilities as advanced_search (single-mailbox scoping via mailboxId, multi-mailbox intersection via requiredMailboxIds, exclusion via excludeMailboxIds, plus sender / recipient / subject / free text / date / attachment / unread / pinned) but returns ONLY metadata on each match — id, threadId, subject, from, to, cc, replyTo, receivedAt, hasAttachment, keywords. Does NOT return preview or any body-derived content. Use in privacy-sensitive flows where the routing decision is made from headers alone — for example, when classifying customer mail by sender / recipient / subject / thread state without ingesting body content. The free-text query still searches body content on the server side; only the result envelope comes back without body excerpts. When the server reports a total match count, results are wrapped in a {"total", "items"} JSON envelope; otherwise a bare JSON array is returned.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -1364,12 +1377,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'list_emails': {
         const { mailboxId, limit, ascending } = args as any;
         const validLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
-        const emails = await client.getEmails(mailboxId, validLimit, !!ascending);
+        const result = await client.getEmails(mailboxId, validLimit, !!ascending);
         return {
           content: [
             {
               type: 'text',
-              text: JSON.stringify(emails, null, 2),
+              text: formatQueryResult(result),
             },
           ],
         };
@@ -1378,12 +1391,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'list_emails_metadata': {
         const { mailboxId, limit, ascending } = (args ?? {}) as any;
         const validLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
-        const emails = await client.getEmailsMetadata(mailboxId, validLimit, !!ascending);
+        const result = await client.getEmailsMetadata(mailboxId, validLimit, !!ascending);
         return {
           content: [
             {
               type: 'text',
-              text: JSON.stringify(emails, null, 2),
+              text: formatQueryResult(result),
             },
           ],
         };
@@ -1629,12 +1642,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           throw new McpError(ErrorCode.InvalidParams, 'query is required');
         }
         const validLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
-        const emails = await client.searchEmails(query, validLimit, !!ascending, coerceBool(excludeDrafts) ?? false);
+        const result = await client.searchEmails(query, validLimit, !!ascending, coerceBool(excludeDrafts) ?? false);
         return {
           content: [
             {
               type: 'text',
-              text: JSON.stringify(emails, null, 2),
+              text: formatQueryResult(result),
             },
           ],
         };
@@ -1646,12 +1659,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           throw new McpError(ErrorCode.InvalidParams, 'query is required');
         }
         const validLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
-        const emails = await client.searchEmailsMetadata(query, validLimit, !!ascending);
+        const result = await client.searchEmailsMetadata(query, validLimit, !!ascending);
         return {
           content: [
             {
               type: 'text',
-              text: JSON.stringify(emails, null, 2),
+              text: formatQueryResult(result),
             },
           ],
         };
@@ -1660,12 +1673,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'list_contacts': {
         const { limit } = args as any;
         const contactsClient = initializeContactsCalendarClient();
-        const contacts = await contactsClient.getContacts(clampLimit(limit, 50, 200));
+        const result = await contactsClient.getContacts(clampLimit(limit, 50, 200));
         return {
           content: [
             {
               type: 'text',
-              text: JSON.stringify(contacts, null, 2),
+              text: formatQueryResult(result),
             },
           ],
         };
@@ -1694,12 +1707,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           throw new McpError(ErrorCode.InvalidParams, 'query is required');
         }
         const contactsClient = initializeContactsCalendarClient();
-        const contacts = await contactsClient.searchContacts(query, clampLimit(limit, 20, 100));
+        const result = await contactsClient.searchContacts(query, clampLimit(limit, 20, 100));
         return {
           content: [
             {
               type: 'text',
-              text: JSON.stringify(contacts, null, 2),
+              text: formatQueryResult(result),
             },
           ],
         };
@@ -1817,12 +1830,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'get_recent_emails': {
         const { limit, mailboxName = null, ascending } = args as any;
         const client = initializeClient();
-        const emails = await client.getRecentEmails(clampLimit(limit, 10, 50), mailboxName, coerceBool(ascending) ?? false);
+        const result = await client.getRecentEmails(clampLimit(limit, 10, 50), mailboxName, coerceBool(ascending) ?? false);
         return {
           content: [
             {
               type: 'text',
-              text: JSON.stringify(emails, null, 2),
+              text: formatQueryResult(result),
             },
           ],
         };
@@ -2020,14 +2033,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const { query, from, to, subject, hasAttachment, isUnread, isPinned, mailboxId, requiredMailboxIds, excludeMailboxIds, after, before, limit, ascending } = args as any;
         const client = initializeClient();
         const validLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
-        const emails = await client.advancedSearch({
+        const result = await client.advancedSearch({
           query, from, to, subject, hasAttachment, isUnread, isPinned, mailboxId, requiredMailboxIds, excludeMailboxIds, after, before, limit: validLimit, ascending
         });
         return {
           content: [
             {
               type: 'text',
-              text: JSON.stringify(emails, null, 2),
+              text: formatQueryResult(result),
             },
           ],
         };
@@ -2037,14 +2050,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const { query, from, to, subject, hasAttachment, isUnread, isPinned, mailboxId, requiredMailboxIds, excludeMailboxIds, after, before, limit, ascending } = (args ?? {}) as any;
         const client = initializeClient();
         const validLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
-        const emails = await client.advancedSearchMetadata({
+        const result = await client.advancedSearchMetadata({
           query, from, to, subject, hasAttachment, isUnread, isPinned, mailboxId, requiredMailboxIds, excludeMailboxIds, after, before, limit: validLimit, ascending
         });
         return {
           content: [
             {
               type: 'text',
-              text: JSON.stringify(emails, null, 2),
+              text: formatQueryResult(result),
             },
           ],
         };
@@ -2313,8 +2326,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         
         // Get some recent emails to test with
         const testLimit = Math.min(Math.max(limit, 1), 10);
-        const emails = await client.getRecentEmails(testLimit, 'inbox');
-        
+        const { items: emails } = await client.getRecentEmails(testLimit, 'inbox');
+
         if (emails.length === 0) {
           return {
             content: [

@@ -605,7 +605,7 @@ describe('JMAP response validation', () => {
         ['error', { type: 'serverFail', description: 'oops' }, 'query'],
       ],
     });
-    // getEmails uses getListResult(response, 1) but only 1 response exists
+    // getEmails uses getQueryResult(response, 0, 1) and the error sits at index 0
     await assert.rejects(
       () => client.getEmails(undefined, 10),
       (err: Error) => {
@@ -646,8 +646,8 @@ describe('searchEmails', () => {
       ],
     });
     const results = await client.searchEmails('test', 10);
-    assert.equal(results.length, 1);
-    assert.equal(results[0].subject, 'Test');
+    assert.equal(results.items.length, 1);
+    assert.equal(results.items[0].subject, 'Test');
   });
 
   it('returns empty array when no results', async () => {
@@ -658,7 +658,7 @@ describe('searchEmails', () => {
       ],
     });
     const results = await client.searchEmails('nonexistent');
-    assert.deepEqual(results, []);
+    assert.deepEqual(results.items, []);
   });
 
   it('throws on JMAP error in query', async () => {

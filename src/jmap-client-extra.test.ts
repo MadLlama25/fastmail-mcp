@@ -1,6 +1,7 @@
 import { describe, it, beforeEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { JmapClient, buildEmailQueryFilter } from './jmap-client.js';
+import { ContactsCalendarClient } from './contacts-calendar.js';
 import { FastmailAuth } from './auth.js';
 
 // ---------- helpers ----------
@@ -87,9 +88,9 @@ describe('getRecentEmails', () => {
       ],
     });
 
-    const emails = await client.getRecentEmails(10, 'inbox');
-    assert.equal(emails.length, 2);
-    assert.equal(emails[0].subject, 'First');
+    const result = await client.getRecentEmails(10, 'inbox');
+    assert.equal(result.items.length, 2);
+    assert.equal(result.items[0].subject, 'First');
   });
 
   it('throws when mailbox is not found', async () => {
@@ -113,8 +114,8 @@ describe('getRecentEmails', () => {
       ],
     });
 
-    const emails = await client.getRecentEmails(5, 'inbox');
-    assert.deepEqual(emails, []);
+    const result = await client.getRecentEmails(5, 'inbox');
+    assert.deepEqual(result.items, []);
   });
 
   it('defaults to all mailboxes except Trash and Spam when no mailbox is given', async () => {
@@ -185,8 +186,8 @@ describe('getEmails', () => {
       ],
     }));
 
-    const emails = await client.getEmails('mb-inbox', 5);
-    assert.equal(emails.length, 1);
+    const result = await client.getEmails('mb-inbox', 5);
+    assert.equal(result.items.length, 1);
 
     const filter = makeReq.mock.calls[0].arguments[0].methodCalls[0][1].filter;
     assert.equal(filter.inMailbox, 'mb-inbox');
@@ -200,8 +201,8 @@ describe('getEmails', () => {
       ],
     }));
 
-    const emails = await client.getEmails(undefined, 10);
-    assert.equal(emails.length, 1);
+    const result = await client.getEmails(undefined, 10);
+    assert.equal(result.items.length, 1);
 
     const filter = makeReq.mock.calls[0].arguments[0].methodCalls[0][1].filter;
     assert.deepEqual(filter, {});
@@ -1036,5 +1037,135 @@ describe('getThread draft handling', () => {
     const thread = await client.getThread('e1', true);
     assert.equal(thread.length, 2);
     assert.deepEqual(thread.map((e: any) => e.id), ['e1', 'e2']);
+  });
+});
+
+// ---------- total result count (calculateTotal / QueryResult) ----------
+
+describe('query total result count', () => {
+  let client: JmapClient;
+
+  beforeEach(() => {
+    client = makeClient();
+  });
+
+  it('getEmails requests calculateTotal on Email/query', async () => {
+    const makeReq = mock.method(client, 'makeRequest', async () => ({
+      methodResponses: [
+        ['Email/query', { ids: [] }, 'query'],
+        ['Email/get', { list: [] }, 'emails'],
+      ],
+    }));
+
+    await client.getEmails('mb-inbox', 5);
+
+    assert.equal(makeReq.mock.calls[0].arguments[0].methodCalls[0][1].calculateTotal, true);
+  });
+
+  it('surfaces the server-reported total alongside the items', async () => {
+    stubMakeRequest(client, {
+      methodResponses: [
+        ['Email/query', { ids: ['e1'], total: 42 }, 'query'],
+        ['Email/get', { list: [{ id: 'e1', subject: 'Only one fetched' }] }, 'emails'],
+      ],
+    });
+
+    const result = await client.getEmails('mb-inbox', 1);
+    assert.equal(result.total, 42);
+    assert.equal(result.items.length, 1);
+  });
+
+  it('omits total when the server does not report one', async () => {
+    stubMakeRequest(client, {
+      methodResponses: [
+        ['Email/query', { ids: ['e1'] }, 'query'],
+        ['Email/get', { list: [{ id: 'e1' }] }, 'emails'],
+      ],
+    });
+
+    const result = await client.getEmails('mb-inbox', 1);
+    assert.equal('total' in result, false);
+    assert.equal(result.items.length, 1);
+  });
+
+  it('metadata variants request and surface the total without widening the property allowlist', async () => {
+    const makeReq = mock.method(client, 'makeRequest', async () => ({
+      methodResponses: [
+        ['Email/query', { ids: ['e1'], total: 7 }, 'query'],
+        ['Email/get', { list: [{ id: 'e1', subject: 'Meta' }] }, 'emails'],
+      ],
+    }));
+
+    const result = await client.getEmailsMetadata('mb-inbox', 1);
+
+    assert.equal(makeReq.mock.calls[0].arguments[0].methodCalls[0][1].calculateTotal, true);
+    assert.equal(result.total, 7);
+    const props = makeReq.mock.calls[0].arguments[0].methodCalls[1][1].properties;
+    assert.equal(props.includes('preview'), false);
+    assert.equal(props.some((p: string) => p.startsWith('body')), false);
+  });
+
+  it('searchEmails and advancedSearch surface the total', async () => {
+    stubMakeRequest(client, {
+      methodResponses: [
+        ['Email/query', { ids: ['e1'], total: 99 }, 'query'],
+        ['Email/get', { list: [{ id: 'e1' }] }, 'emails'],
+      ],
+    });
+
+    const search = await client.searchEmails('test', 1);
+    assert.equal(search.total, 99);
+
+    const advanced = await client.advancedSearch({ query: 'test', limit: 1 });
+    assert.equal(advanced.total, 99);
+  });
+});
+
+describe('getContacts total result count', () => {
+  function makeContactsClient(): ContactsCalendarClient {
+    const auth = new FastmailAuth({ apiToken: 'fake-token' });
+    const client = new ContactsCalendarClient(auth);
+
+    mock.method(client, 'getSession', async () => ({
+      apiUrl: 'https://api.example.com/jmap/api/',
+      accountId: ACCOUNT_ID,
+      capabilities: { 'urn:ietf:params:jmap:contacts': {} },
+    }));
+
+    return client;
+  }
+
+  it('surfaces the total from ContactCard/query', async () => {
+    const client = makeContactsClient();
+    stubMakeRequest(client, {
+      methodResponses: [
+        ['ContactCard/query', { ids: ['c1'], total: 250 }, 'query'],
+        ['ContactCard/get', { list: [{ id: 'c1', name: 'Test Person' }] }, 'contacts'],
+      ],
+    });
+
+    const result = await client.getContacts(1);
+    assert.equal(result.total, 250);
+    assert.equal(result.items.length, 1);
+  });
+
+  it('AddressBook fallback returns items without a total', async () => {
+    const client = makeContactsClient();
+    let call = 0;
+    mock.method(client, 'makeRequest', async () => {
+      call += 1;
+      if (call === 1) {
+        throw new Error('ContactCard/query not supported');
+      }
+      return {
+        methodResponses: [
+          ['AddressBook/get', { list: [{ id: 'ab1', name: 'Default' }] }, 'addressbooks'],
+        ],
+      };
+    });
+
+    const result = await client.getContacts(10);
+    assert.equal('total' in result, false);
+    assert.equal(result.items.length, 1);
   });
 });
