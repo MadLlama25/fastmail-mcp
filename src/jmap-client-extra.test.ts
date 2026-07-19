@@ -1169,3 +1169,44 @@ describe('getContacts total result count', () => {
     assert.equal(result.items.length, 1);
   });
 });
+
+describe('getContactById not-found', () => {
+  function makeContactsClient(): ContactsCalendarClient {
+    const auth = new FastmailAuth({ apiToken: 'fake-token' });
+    const client = new ContactsCalendarClient(auth);
+
+    mock.method(client, 'getSession', async () => ({
+      apiUrl: 'https://api.example.com/jmap/api/',
+      accountId: ACCOUNT_ID,
+      capabilities: { 'urn:ietf:params:jmap:contacts': {} },
+    }));
+
+    return client;
+  }
+
+  it('returns the contact when it exists', async () => {
+    const client = makeContactsClient();
+    stubMakeRequest(client, {
+      methodResponses: [
+        ['ContactCard/get', { list: [{ id: 'c1', name: 'Real Person' }] }, 'contact'],
+      ],
+    });
+
+    const contact = await client.getContactById('c1');
+    assert.equal(contact.id, 'c1');
+  });
+
+  it('throws instead of returning undefined for an unknown id', async () => {
+    const client = makeContactsClient();
+    stubMakeRequest(client, {
+      methodResponses: [
+        ['ContactCard/get', { list: [], notFound: ['ghost'] }, 'contact'],
+      ],
+    });
+
+    await assert.rejects(
+      () => client.getContactById('ghost'),
+      /Contact not found: ghost/
+    );
+  });
+});

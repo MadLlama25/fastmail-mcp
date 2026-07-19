@@ -1096,9 +1096,15 @@ export class CalDAVCalendarClient {
     return null;
   }
 
-  async getCalendarEventById(eventId: string): Promise<CalendarEvent | null> {
+  async getCalendarEventById(eventId: string): Promise<CalendarEvent> {
     const obj = await this.findCalendarObjectByUID(eventId);
-    return obj ? parseCalendarObject(obj, { includeParticipants: true }) : null;
+    // Throw rather than return null so the MCP tool surfaces a real not-found
+    // error — matches updateCalendarEvent/deleteCalendarEvent below. A null
+    // here used to reach callers as a successful "null" tool response.
+    if (!obj) {
+      throw new Error(`Calendar event not found: ${eventId}`);
+    }
+    return parseCalendarObject(obj, { includeParticipants: true });
   }
 
   async createCalendarEvent(event: {

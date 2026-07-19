@@ -81,12 +81,19 @@ export class ContactsCalendarClient extends JmapClient {
       ]
     };
 
+    let contact;
     try {
       const response = await this.makeRequest(request);
-      return this.getListResult(response, 0)[0];
+      contact = this.getListResult(response, 0)[0];
     } catch (error) {
       throw new Error(`Contact access not supported: ${error instanceof Error ? error.message : String(error)}. Try checking account permissions or enabling contacts API access in Fastmail settings.`);
     }
+    // ContactCard/get reports unknown ids via notFound, leaving list empty — a
+    // bare undefined here used to serialize as a successful empty tool response.
+    if (!contact) {
+      throw new Error(`Contact not found: ${id}`);
+    }
+    return contact;
   }
 
   async searchContacts(query: string, limit: number = 20): Promise<QueryResult> {
