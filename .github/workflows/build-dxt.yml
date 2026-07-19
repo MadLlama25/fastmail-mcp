@@ -30,6 +30,9 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Drop dev dependencies from the archive
+        run: npm prune --omit=dev
+
       - name: Pack DXT
         run: npx --yes @anthropic-ai/dxt@0.2.6 pack
 
@@ -40,6 +43,21 @@ jobs:
           FILE=$(ls -1 *.dxt | head -n1)
           mv "$FILE" "fastmail-mcp-$VERSION.dxt"
           echo "DXT_FILE=fastmail-mcp-$VERSION.dxt" >> $GITHUB_ENV
+
+      - name: Boot-smoke the packed artifact
+        shell: bash
+        # Unpack the exact archive we are about to publish and prove it boots.
+        # A .dxtignore pattern once stripped a runtime dependency's entry point
+        # (node_modules/debug/src) and the .dxt died silently on initialize —
+        # this gate makes that class of packaging bug unpublishable.
+        run: |
+          set -euo pipefail
+          TMP=$(mktemp -d)
+          unzip -q "$DXT_FILE" -d "$TMP"
+          REQ='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"dxt-boot-smoke","version":"0.0.0"}}}'
+          OUT=$(printf '%s\n' "$REQ" | FASTMAIL_API_TOKEN=dummy-boot-smoke timeout 30s node "$TMP/dist/index.js")
+          grep -q '"serverInfo"' <<< "$OUT" || { echo "packed .dxt failed to answer initialize" >&2; exit 1; }
+          echo "packed artifact boots and answers initialize"
 
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
