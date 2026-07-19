@@ -2,9 +2,19 @@
   "mcpServers": {
     "fastmail": {
       "command": "node",
-      "args": ["dist/index.js"],
+      "args": [
+        "dist/index.js"
+      ],
       "env": {
-        "FASTMAIL_API_TOKEN": "${FASTMAIL_API_TOKEN}"
+        "FASTMAIL_API_TOKEN": "${FASTMAIL_API_TOKEN}",
+        "FASTMAIL_BASE_URL": "${FASTMAIL_BASE_URL}",
+        "FASTMAIL_DOWNLOAD_DIR": "${FASTMAIL_DOWNLOAD_DIR}",
+        "FASTMAIL_CALDAV_USERNAME": "${FASTMAIL_CALDAV_USERNAME}",
+        "FASTMAIL_CALDAV_PASSWORD": "${FASTMAIL_CALDAV_PASSWORD}",
+        "FASTMAIL_CALDAV_DISPLAY_NAME": "${FASTMAIL_CALDAV_DISPLAY_NAME}",
+        "FASTMAIL_WEBDAV_URL": "${FASTMAIL_WEBDAV_URL}",
+        "FASTMAIL_WEBDAV_USERNAME": "${FASTMAIL_WEBDAV_USERNAME}",
+        "FASTMAIL_WEBDAV_PASSWORD": "${FASTMAIL_WEBDAV_PASSWORD}"
       }
     }
   }

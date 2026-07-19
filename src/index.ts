@@ -75,7 +75,6 @@ function getAuthConfig(): FastmailConfig {
   // the api.fastmail.com / www.fastmailusercontent.com allowlist.
   const unsafeInfo = findEnvValue([
     'FASTMAIL_ALLOW_UNSAFE_BASE_URL',
-    'USER_CONFIG_FASTMAIL_ALLOW_UNSAFE_BASE_URL',
   ]);
   const allowUnsafeBaseUrl = unsafeInfo.value === 'true' || unsafeInfo.value === '1';
 
@@ -2637,7 +2636,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           },
           calendar: {
             available: calendarAvailable,
-            functions: ['list_calendars', 'list_calendar_events', 'get_calendar_event', 'create_calendar_event'],
+            functions: ['list_calendars', 'list_calendar_events', 'get_calendar_event', 'create_calendar_event', 'update_calendar_event', 'delete_calendar_event'],
             note: calendarNote,
             enablementGuide: calendarAvailable ? null : {
               steps: [
