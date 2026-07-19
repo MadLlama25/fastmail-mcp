@@ -2,6 +2,7 @@ import { describe, it, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   extractVEvent,
+  resolveDisplayName,
   parseICalValue,
   findValueBoundary,
   parseAllICalProperties,
@@ -2403,5 +2404,18 @@ describe('CalDAV write status checking (assertDavOk)', () => {
   it('succeeds on a 2xx status', async () => {
     const client = mockClientWithStatus(204);
     await client.updateCalendarEvent('s@fm', { title: 'X' });
+  });
+});
+
+describe('resolveDisplayName', () => {
+  it('uses the env value when it is a real string', () => {
+    assert.equal(resolveDisplayName('Jeremy G', 'fallback@example.com'), 'Jeremy G');
+  });
+  it('falls back when unset or blank', () => {
+    assert.equal(resolveDisplayName(undefined, 'fb'), 'fb');
+    assert.equal(resolveDisplayName('   ', 'fb'), 'fb');
+  });
+  it('falls back on an unresolved DXT config placeholder', () => {
+    assert.equal(resolveDisplayName('${user_config.fastmail_caldav_display_name}', 'fb'), 'fb');
   });
 });

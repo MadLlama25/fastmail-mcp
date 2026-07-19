@@ -1,7 +1,7 @@
 {
   "dxt_version": "0.1",
   "name": "fastmail-mcp",
-  "version": "1.13.0",
+  "version": "1.13.1",
   "description": "Unofficial MCP server for Fastmail API integration (not affiliated with or endorsed by Fastmail)",
   "author": {
     "name": "Jeremy Gill"
@@ -17,7 +17,13 @@
       "env": {
         "FASTMAIL_API_TOKEN": "${user_config.fastmail_api_token}",
         "FASTMAIL_BASE_URL": "${user_config.fastmail_base_url}",
-        "FASTMAIL_DOWNLOAD_DIR": "${user_config.fastmail_download_dir}"
+        "FASTMAIL_DOWNLOAD_DIR": "${user_config.fastmail_download_dir}",
+        "FASTMAIL_CALDAV_USERNAME": "${user_config.fastmail_caldav_username}",
+        "FASTMAIL_CALDAV_PASSWORD": "${user_config.fastmail_caldav_password}",
+        "FASTMAIL_CALDAV_DISPLAY_NAME": "${user_config.fastmail_caldav_display_name}",
+        "FASTMAIL_WEBDAV_URL": "${user_config.fastmail_webdav_url}",
+        "FASTMAIL_WEBDAV_USERNAME": "${user_config.fastmail_webdav_username}",
+        "FASTMAIL_WEBDAV_PASSWORD": "${user_config.fastmail_webdav_password}"
       }
     }
   },
@@ -53,6 +59,12 @@
       "type": "string",
       "description": "App-specific password with Calendars scope (Settings -> Privacy & Security -> App passwords). Optional; calendar tools are disabled without it.",
       "sensitive": true,
+      "required": false
+    },
+    "fastmail_caldav_display_name": {
+      "title": "CalDAV Display Name",
+      "type": "string",
+      "description": "Display name used as ORGANIZER when creating calendar events with participants (defaults to the CalDAV username)",
       "required": false
     },
     "fastmail_webdav_url": {

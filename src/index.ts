@@ -18,7 +18,7 @@ import { coerceRecipients, coerceStringArray, coerceBool, redactBearerTokens, re
 const server = new Server(
   {
     name: 'fastmail-mcp',
-    version: '1.13.0',
+    version: '1.13.1',
   },
   {
     capabilities: {
@@ -108,10 +108,14 @@ function initializeCalDAVClient(): CalDAVCalendarClient | null {
   const username = findEnvValue([
     'FASTMAIL_CALDAV_USERNAME',
     'USER_CONFIG_FASTMAIL_CALDAV_USERNAME',
+    'USER_CONFIG_fastmail_caldav_username',
+    'fastmail_caldav_username',
   ]).value;
   const password = findEnvValue([
     'FASTMAIL_CALDAV_PASSWORD',
     'USER_CONFIG_FASTMAIL_CALDAV_PASSWORD',
+    'USER_CONFIG_fastmail_caldav_password',
+    'fastmail_caldav_password',
   ]).value;
 
   if (!username || !password) return null;
@@ -133,14 +137,20 @@ function initializeWebDAVClient(): WebDAVFilesClient | null {
   const baseUrl = findEnvValue([
     'FASTMAIL_WEBDAV_URL',
     'USER_CONFIG_FASTMAIL_WEBDAV_URL',
+    'USER_CONFIG_fastmail_webdav_url',
+    'fastmail_webdav_url',
   ]).value;
   const username = findEnvValue([
     'FASTMAIL_WEBDAV_USERNAME',
     'USER_CONFIG_FASTMAIL_WEBDAV_USERNAME',
+    'USER_CONFIG_fastmail_webdav_username',
+    'fastmail_webdav_username',
   ]).value;
   const password = findEnvValue([
     'FASTMAIL_WEBDAV_PASSWORD',
     'USER_CONFIG_FASTMAIL_WEBDAV_PASSWORD',
+    'USER_CONFIG_fastmail_webdav_password',
+    'fastmail_webdav_password',
   ]).value;
 
   if (!baseUrl || !username || !password) return null;
