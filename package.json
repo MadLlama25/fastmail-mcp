@@ -32,8 +32,8 @@
     "tsdav": "^2.3.1"
   },
   "devDependencies": {
-    "@types/node": "^25.8.0",
-    "tsx": "^4.22.0",
-    "typescript": "^6.0.3"
+    "@types/node": "^26.1.1",
+    "tsx": "^4.23.0",
+    "typescript": "^7.0.2"
   }
 }
