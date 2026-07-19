@@ -1210,3 +1210,165 @@ describe('getContactById not-found', () => {
     );
   });
 });
+
+// ---------- attachments on send (uploadBlob / resolveAttachments / carry-over) ----------
+
+describe('attachments on send', () => {
+  const IDENTITY = { id: 'id-1', name: 'Test User', email: 'me@example.com', mayDelete: false };
+  const SESSION_WITH_UPLOAD = {
+    apiUrl: 'https://api.example.com/jmap/api/',
+    accountId: ACCOUNT_ID,
+    capabilities: { 'urn:ietf:params:jmap:core': { maxSizeUpload: 1024 } },
+    uploadUrl: 'https://api.fastmail.com/jmap/upload/{accountId}/',
+    downloadUrl: 'https://www.fastmailusercontent.com/jmap/download/{accountId}/{blobId}/{name}?type={type}',
+  };
+
+  function makeUploadClient(): JmapClient {
+    const auth = new FastmailAuth({ apiToken: 'fake-token' });
+    const client = new JmapClient(auth);
+    mock.method(client, 'getSession', async () => SESSION_WITH_UPLOAD);
+    return client;
+  }
+
+  it('uploadBlob POSTs to the substituted uploadUrl with Content-Type and no redirects', async () => {
+    const client = makeUploadClient();
+    const fetchMock = mock.method(globalThis, 'fetch', async () => new Response(
+      JSON.stringify({ blobId: 'B1', type: 'text/plain', size: 5 }), { status: 200 },
+    ));
+    try {
+      const out = await client.uploadBlob(Buffer.from('hello'), 'text/plain');
+      assert.equal(out.blobId, 'B1');
+      const [url, opts] = fetchMock.mock.calls[0].arguments;
+      assert.equal(url, `https://api.fastmail.com/jmap/upload/${ACCOUNT_ID}/`);
+      assert.equal(opts.method, 'POST');
+      assert.equal(opts.headers['Content-Type'], 'text/plain');
+      assert.equal(opts.redirect, 'error');
+    } finally { fetchMock.mock.restore(); }
+  });
+
+  it('uploadBlob rejects payloads above maxSizeUpload before any network call', async () => {
+    const client = makeUploadClient();
+    const fetchMock = mock.method(globalThis, 'fetch', async () => { throw new Error('should not fetch'); });
+    try {
+      await assert.rejects(
+        () => client.uploadBlob(Buffer.alloc(2048), 'application/octet-stream'),
+        /upload limit/,
+      );
+      assert.equal(fetchMock.mock.calls.length, 0);
+    } finally { fetchMock.mock.restore(); }
+  });
+
+  it('resolveAttachments reuses an existing attachment blobId with zero byte transfer', async () => {
+    const client = makeUploadClient();
+    stubMakeRequest(client, {
+      methodResponses: [
+        ['Email/get', { list: [{ id: 'e1', attachments: [
+          { partId: 'p2', blobId: 'BLOB-existing', type: 'application/pdf', name: 'report.pdf', size: 9 },
+        ] }] }, 'getEmail'],
+      ],
+    });
+    const fetchMock = mock.method(globalThis, 'fetch', async () => { throw new Error('no fetch expected'); });
+    try {
+      const parts = await client.resolveAttachments([{ emailId: 'e1', attachmentId: 'p2' }]);
+      assert.deepEqual(parts, [{ blobId: 'BLOB-existing', type: 'application/pdf', name: 'report.pdf', disposition: 'attachment' }]);
+      assert.equal(fetchMock.mock.calls.length, 0);
+    } finally { fetchMock.mock.restore(); }
+  });
+
+  it('resolveAttachments rejects entries with zero or multiple sources', async () => {
+    const client = makeUploadClient();
+    await assert.rejects(() => client.resolveAttachments([{ name: 'x.txt' }]), /exactly one source/);
+    await assert.rejects(
+      () => client.resolveAttachments([{ blobId: 'B', localPath: 'a.txt' }]),
+      /exactly one source/,
+    );
+  });
+
+  it('sendEmail places attachments as the RFC 8621 convenience property, never bodyStructure', async () => {
+    const client = makeUploadClient();
+    mock.method(client, 'getIdentities', async () => [IDENTITY]);
+    mock.method(client, 'getMailboxes', async () => [DRAFTS_MAILBOX, SENT_MAILBOX]);
+    const makeReq = mock.method(client, 'makeRequest', async () => ({
+      methodResponses: [
+        ['Email/set', { created: { draft: { id: 'e9' } } }, 'createEmail'],
+        ['EmailSubmission/set', { created: { submission: { id: 's9' } } }, 'submitEmail'],
+      ],
+    }));
+
+    await client.sendEmail({
+      to: ['me@example.com'], subject: 'With attachment', textBody: 'body',
+      attachments: [{ blobId: 'B7', name: 'notes.txt', type: 'text/plain' }],
+    });
+
+    const draft = makeReq.mock.calls[0].arguments[0].methodCalls[0][1].create.draft;
+    assert.deepEqual(draft.attachments, [{ blobId: 'B7', type: 'text/plain', name: 'notes.txt', disposition: 'attachment' }]);
+    assert.equal('bodyStructure' in draft, false);
+    assert.ok(draft.textBody, 'convenience textBody must survive alongside attachments');
+  });
+
+  it('updateDraft carries existing attachments through the recreate (regression)', async () => {
+    const client = makeUploadClient();
+    mock.method(client, 'getIdentities', async () => [IDENTITY]);
+    const makeReq = mock.method(client, 'makeRequest', async (req: any) => {
+      if (req.methodCalls[0][0] === 'Email/get') {
+        return { methodResponses: [['Email/get', { list: [{
+          id: 'd1', subject: 'Draft', keywords: { $draft: true }, mailboxIds: { 'mb-drafts': true },
+          from: [{ email: 'me@example.com' }],
+          textBody: [{ partId: 't1', type: 'text/plain' }],
+          bodyValues: { t1: { value: 'original body' } },
+          attachments: [{ blobId: 'B-keep', type: 'image/png', name: 'pic.png', disposition: 'attachment' }],
+        }] }, 'getEmail']] };
+      }
+      return { methodResponses: [['Email/set', { created: { draft: { id: 'd2' } } }, 'updateDraft']] };
+    });
+
+    await client.updateDraft('d1', { subject: 'Edited subject only' });
+
+    const setCall = makeReq.mock.calls.find((c: any) => c.arguments[0].methodCalls[0][0] === 'Email/set');
+    const recreated = setCall.arguments[0].methodCalls[0][1].create.draft;
+    assert.deepEqual(recreated.attachments, [{ blobId: 'B-keep', type: 'image/png', name: 'pic.png', disposition: 'attachment' }]);
+  });
+
+  it('updateDraft fetches the attachments property (the old request silently dropped them)', async () => {
+    const client = makeUploadClient();
+    mock.method(client, 'getIdentities', async () => [IDENTITY]);
+    const makeReq = mock.method(client, 'makeRequest', async (req: any) => {
+      if (req.methodCalls[0][0] === 'Email/get') {
+        return { methodResponses: [['Email/get', { list: [{
+          id: 'd1', keywords: { $draft: true }, mailboxIds: { 'mb-drafts': true }, from: [{ email: 'me@example.com' }],
+        }] }, 'getEmail']] };
+      }
+      return { methodResponses: [['Email/set', { created: { draft: { id: 'd2' } } }, 'updateDraft']] };
+    });
+    await client.updateDraft('d1', { subject: 'x' });
+    const props = makeReq.mock.calls[0].arguments[0].methodCalls[0][1].properties;
+    assert.ok(props.includes('attachments'), 'Email/get must request attachments');
+  });
+});
+
+describe('validateReadPath', () => {
+  it('rejects paths that lexically escape the download dir', async () => {
+    await assert.rejects(
+      () => JmapClient.validateReadPath('../outside.txt', '/tmp/fastmail-allowed'),
+      /must be within/,
+    );
+  });
+
+  it('reads a real file inside the dir and rejects a symlink escaping it', async () => {
+    const { mkdtempSync, writeFileSync, symlinkSync } = await import('fs');
+    const { tmpdir } = await import('os');
+    const { join } = await import('path');
+    const allowed = mkdtempSync(join(tmpdir(), 'fm-read-'));
+    const outside = mkdtempSync(join(tmpdir(), 'fm-out-'));
+    writeFileSync(join(allowed, 'ok.txt'), 'fine');
+    writeFileSync(join(outside, 'secret.txt'), 'secret');
+    symlinkSync(join(outside, 'secret.txt'), join(allowed, 'sneaky.txt'));
+
+    const good = await JmapClient.validateReadPath('ok.txt', allowed);
+    assert.ok(good.endsWith('ok.txt'));
+    await assert.rejects(
+      () => JmapClient.validateReadPath('sneaky.txt', allowed),
+      /must resolve within/,
+    );
+  });
+});
