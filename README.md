@@ -1,5 +1,7 @@
 # Fastmail MCP Server (Unofficial)
 
+[![MCP Toplist](https://mcptoplist.com/badge/glama%2FMadLlama25%2Ffastmail-mcp.svg)](https://mcptoplist.com/server/glama%2FMadLlama25%2Ffastmail-mcp)
+
 An **unofficial** Model Context Protocol (MCP) server that provides access to the Fastmail API, enabling AI assistants to interact with email, contacts, and calendar data.
 
 > **Disclaimer:** This is a community project. It is **not affiliated with, endorsed by, or supported by Fastmail**. "Fastmail" is a trademark of Fastmail Pty Ltd; it is used here only to describe compatibility with their public JMAP/CalDAV/WebDAV APIs. Use at your own risk under the terms of the project license.
