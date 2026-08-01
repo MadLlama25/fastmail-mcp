@@ -2,7 +2,7 @@ import { describe, it, beforeEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { homedir } from 'os';
 import { resolve, join, basename, sep } from 'path';
-import { JmapClient } from './jmap-client.js';
+import { JmapClient, type JmapRequest } from './jmap-client.js';
 import { FastmailAuth } from './auth.js';
 
 // ---------- helpers ----------
@@ -1196,6 +1196,158 @@ describe('updateDraft wildcard identity', () => {
 
     const emailObj = makeReq.mock.calls[1].arguments[0].methodCalls[0][1].create.draft;
     assert.deepEqual(emailObj.from, [{ name: 'Una Wilde', email: 'work@example.com' }]);
+  });
+});
+
+// ---------- identity signatures ----------
+
+const SIGNED_IDENTITY = {
+  id: 'id-signed',
+  name: 'Team Example',
+  email: '*@example.com',
+  mayDelete: true,
+  textSignature: 'Best Regards, \n\nThe Example Team.\n\n\n',
+  htmlSignature: '<div><span>The Example Team.</span></div>',
+};
+
+// Fastmail stores these placeholders for an identity whose signature was never set.
+const BLANK_SIGNATURE_IDENTITY = {
+  ...SIGNED_IDENTITY,
+  textSignature: '\n',
+  htmlSignature: '<div><br></div><div><br></div>',
+};
+
+describe('sendEmail identity signature', () => {
+  let client: JmapClient;
+
+  beforeEach(() => {
+    client = makeClient();
+    mock.method(client, 'getIdentities', async () => [SIGNED_IDENTITY]);
+    mock.method(client, 'getMailboxes', async () => [DRAFTS_MAILBOX, SENT_MAILBOX]);
+  });
+
+  function stubSend(c: JmapClient) {
+    return mock.method(c, 'makeRequest', async () => ({
+      methodResponses: [
+        ['Email/set', { created: { draft: { id: 'email-new' } } }, 'createEmail'],
+        ['EmailSubmission/set', { created: { submission: { id: 'sub-1' } } }, 'submitEmail'],
+      ],
+    }));
+  }
+
+  it('appends the identity signature to both bodies', async () => {
+    const makeReq = stubSend(client);
+
+    await client.sendEmail({
+      to: ['bob@example.com'],
+      subject: 'Test',
+      textBody: 'Hello',
+      htmlBody: '<div>Hello</div>',
+      from: 'hello@example.com',
+    });
+
+    const draft = makeReq.mock.calls[0].arguments[0].methodCalls[0][1].create.draft;
+    assert.equal(draft.bodyValues.text.value, `Hello\n\n${SIGNED_IDENTITY.textSignature}`);
+    assert.equal(draft.bodyValues.html.value, `<div>Hello</div>${SIGNED_IDENTITY.htmlSignature}`);
+  });
+
+  it('keeps a text-only message text-only', async () => {
+    const makeReq = stubSend(client);
+
+    await client.sendEmail({ to: ['bob@example.com'], subject: 'Test', textBody: 'Hello' });
+
+    const draft = makeReq.mock.calls[0].arguments[0].methodCalls[0][1].create.draft;
+    assert.equal(draft.bodyValues.text.value, `Hello\n\n${SIGNED_IDENTITY.textSignature}`);
+    assert.equal(draft.htmlBody, undefined);
+    assert.equal(draft.bodyValues.html, undefined);
+  });
+
+  it('leaves bodies untouched for an identity with blank signatures', async () => {
+    mock.method(client, 'getIdentities', async () => [BLANK_SIGNATURE_IDENTITY]);
+    const makeReq = stubSend(client);
+
+    await client.sendEmail({
+      to: ['bob@example.com'],
+      subject: 'Test',
+      textBody: 'Hello',
+      htmlBody: '<div>Hello</div>',
+    });
+
+    const draft = makeReq.mock.calls[0].arguments[0].methodCalls[0][1].create.draft;
+    assert.equal(draft.bodyValues.text.value, 'Hello');
+    assert.equal(draft.bodyValues.html.value, '<div>Hello</div>');
+  });
+
+  it('does not double-sign a body the caller already signed', async () => {
+    const makeReq = stubSend(client);
+    const alreadySigned = `Hello\n\n${SIGNED_IDENTITY.textSignature}`;
+
+    await client.sendEmail({ to: ['bob@example.com'], subject: 'Test', textBody: alreadySigned });
+
+    const draft = makeReq.mock.calls[0].arguments[0].methodCalls[0][1].create.draft;
+    assert.equal(draft.bodyValues.text.value, alreadySigned);
+  });
+});
+
+describe('createDraft identity signature', () => {
+  let client: JmapClient;
+
+  beforeEach(() => {
+    client = makeClient();
+    mock.method(client, 'getIdentities', async () => [SIGNED_IDENTITY]);
+  });
+
+  it('signs a draft, so reply_email with send=false is signed too', async () => {
+    const makeReq = mock.method(client, 'makeRequest', async () => ({
+      methodResponses: [['Email/set', { created: { draft: { id: 'draft-9' } } }, 'createDraft']],
+    }));
+
+    await client.createDraft({ to: ['bob@example.com'], subject: 'Test', textBody: 'Hello' });
+
+    const draft = makeReq.mock.calls[0].arguments[0].methodCalls[0][1].create.draft;
+    assert.equal(draft.bodyValues.text.value, `Hello\n\n${SIGNED_IDENTITY.textSignature}`);
+  });
+});
+
+describe('updateDraft identity signature', () => {
+  let client: JmapClient;
+
+  beforeEach(() => {
+    client = makeClient();
+    mock.method(client, 'getIdentities', async () => [SIGNED_IDENTITY]);
+  });
+
+  function stubEdit(c: JmapClient, existing: unknown) {
+    return mock.method(c, 'makeRequest', async (req: JmapRequest) => {
+      if (req.methodCalls[0][0] === 'Email/get') {
+        return { methodResponses: [['Email/get', { list: [existing] }, 'getEmail']] };
+      }
+      return { methodResponses: [['Email/set', { created: { draft: { id: 'draft-2' } }, destroyed: ['draft-1'] }, 'updateDraft']] };
+    });
+  }
+
+  it('re-signs a replaced body', async () => {
+    const makeReq = stubEdit(client, { ...EXISTING_DRAFT, from: [{ email: 'hello@example.com' }] });
+
+    await client.updateDraft('draft-1', { textBody: 'Rewritten' });
+
+    const draft = makeReq.mock.calls[1].arguments[0].methodCalls[0][1].create.draft;
+    assert.equal(draft.bodyValues.text.value, `Rewritten\n\n${SIGNED_IDENTITY.textSignature}`);
+  });
+
+  it('carries an untouched body over verbatim on a subject-only edit', async () => {
+    const signedBody = `Old body\n\n${SIGNED_IDENTITY.textSignature}`;
+    const existing = {
+      ...EXISTING_DRAFT,
+      from: [{ email: 'hello@example.com' }],
+      bodyValues: { text: { value: signedBody } },
+    };
+    const makeReq = stubEdit(client, existing);
+
+    await client.updateDraft('draft-1', { subject: 'New subject' });
+
+    const draft = makeReq.mock.calls[1].arguments[0].methodCalls[0][1].create.draft;
+    assert.equal(draft.bodyValues.text.value, signedBody);
   });
 });
 

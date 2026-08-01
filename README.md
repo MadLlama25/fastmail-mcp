@@ -340,6 +340,27 @@ The URL must be HTTPS. Note: Fastmail Files ignores the WebDAV `If-None-Match` p
 
 Uploads respect the server's `maxSizeUpload` (~50 MB on Fastmail). Editing a draft preserves its existing attachments.
 
+### Identity signatures
+
+`send_email`, `reply_email`, `create_draft`, and `edit_draft` append the sending identity's
+signature, matching what the Fastmail web client composes. The signature comes from the JMAP
+identity that was resolved for the message (`textSignature` / `htmlSignature`, RFC 8621 §6.1),
+so it follows the `from` address — including wildcard identities such as `*@example.com`.
+
+- Each body part is signed with its matching signature: `textBody` gets `textSignature`,
+  `htmlBody` gets `htmlSignature`. A part you did not supply is never created, so a plain-text
+  message stays plain text.
+- Identities with no signature configured are left alone. Fastmail stores placeholders (`"\n"`,
+  `<div><br></div>`) for these, and appending them would add nothing but whitespace.
+- Appending is idempotent: a body that already ends with the signature is not signed twice, so
+  editing a draft or replaying a body the server returned stays single-signed.
+- `edit_draft` re-signs only the body you replace. An edit that leaves a body alone (changing
+  just the subject, say) carries that body over untouched.
+- `send_draft` does not sign — it submits an already-composed draft as-is.
+
+To change what is appended, edit the signature on the identity in Fastmail
+(Settings → Identities); this server does not define signatures of its own.
+
 ### Contacts write scope
 
 `create_contact` / `update_contact` / `delete_contact` need the API token to have **read-write** contacts scope (Settings → Privacy & Security → API tokens). Read-only tokens keep the three read tools working and fail writes with a `forbidden` error.
@@ -357,6 +378,7 @@ src/
 ├── webdav-files-client.ts # WebDAV file storage client (save_attachment_to_webdav)
 ├── url-validation.ts      # Base-URL allowlist / HTTPS validation
 ├── coerce.ts              # Input coercion helpers
+├── signature.ts           # Identity signature application (textSignature / htmlSignature)
 └── *.test.ts              # Unit tests (colocated)
 ```
 

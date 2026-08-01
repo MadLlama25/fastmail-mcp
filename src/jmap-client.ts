@@ -1,5 +1,6 @@
 import { FastmailAuth } from './auth.js';
 import { validateFastmailUrl } from './url-validation.js';
+import { applyIdentitySignature, appendTextSignature, appendHtmlSignature } from './signature.js';
 import { writeFile, mkdir, realpath, stat, lstat, unlink, readFile } from 'fs/promises';
 import { dirname, resolve, normalize, sep, basename, join } from 'path';
 import { homedir } from 'os';
@@ -582,6 +583,14 @@ export class JmapClient {
       throw new Error('Either textBody or htmlBody must be provided');
     }
 
+    // Apply the sending identity's configured signature, as the Fastmail web
+    // client does. Checked after the body validation above so an empty body can
+    // never be turned into a signature-only message.
+    const { textBody, htmlBody } = applyIdentitySignature(
+      { textBody: email.textBody, htmlBody: email.htmlBody },
+      selectedIdentity,
+    );
+
     const initialMailboxIds: Record<string, boolean> = {};
     initialMailboxIds[initialMailboxId] = true;
 
@@ -605,11 +614,11 @@ export class JmapClient {
       ...(email.inReplyTo && { inReplyTo: email.inReplyTo }),
       ...(email.references && { references: email.references }),
       ...(email.replyTo?.length && { replyTo: email.replyTo.map(addr => ({ email: addr })) }),
-      textBody: email.textBody ? [{ partId: 'text', type: 'text/plain' }] : undefined,
-      htmlBody: email.htmlBody ? [{ partId: 'html', type: 'text/html' }] : undefined,
+      textBody: textBody ? [{ partId: 'text', type: 'text/plain' }] : undefined,
+      htmlBody: htmlBody ? [{ partId: 'html', type: 'text/html' }] : undefined,
       bodyValues: {
-        ...(email.textBody && { text: { value: email.textBody } }),
-        ...(email.htmlBody && { html: { value: email.htmlBody } })
+        ...(textBody && { text: { value: textBody } }),
+        ...(htmlBody && { html: { value: htmlBody } })
       },
       // RFC 8621 §4.6 convenience property: the server assembles the final
       // multipart bodyStructure from textBody/htmlBody/attachments itself.
@@ -717,6 +726,13 @@ export class JmapClient {
 
     const fromEmail = email.from || selectedIdentity.email;
 
+    // Sign with the resolved identity, matching sendEmail — a draft is composed
+    // mail, and reply_email routes through here when send=false.
+    const { textBody, htmlBody } = applyIdentitySignature(
+      { textBody: email.textBody, htmlBody: email.htmlBody },
+      selectedIdentity,
+    );
+
     // Resolve drafts mailbox
     let draftMailboxId: string;
     if (email.mailboxId) {
@@ -746,12 +762,12 @@ export class JmapClient {
     if (email.inReplyTo?.length) emailObject.inReplyTo = email.inReplyTo;
     if (email.references?.length) emailObject.references = email.references;
     if (email.replyTo?.length) emailObject.replyTo = email.replyTo.map(addr => ({ email: addr }));
-    if (email.textBody) emailObject.textBody = [{ partId: 'text', type: 'text/plain' }];
-    if (email.htmlBody) emailObject.htmlBody = [{ partId: 'html', type: 'text/html' }];
-    if (email.textBody || email.htmlBody) {
+    if (textBody) emailObject.textBody = [{ partId: 'text', type: 'text/plain' }];
+    if (htmlBody) emailObject.htmlBody = [{ partId: 'html', type: 'text/html' }];
+    if (textBody || htmlBody) {
       emailObject.bodyValues = {
-        ...(email.textBody && { text: { value: email.textBody } }),
-        ...(email.htmlBody && { html: { value: email.htmlBody } })
+        ...(textBody && { text: { value: textBody } }),
+        ...(htmlBody && { html: { value: htmlBody } })
       };
     }
     if (email.attachments?.length) {
@@ -879,8 +895,15 @@ export class JmapClient {
     const mergedBcc = updates.bcc !== undefined ? updates.bcc.map(addr => ({ email: addr })) : (existingEmail.bcc || []);
     const mergedReplyTo = updates.replyTo !== undefined ? updates.replyTo.map(addr => ({ email: addr })) : (existingEmail.replyTo || null);
 
-    const textBodyValue = updates.textBody !== undefined ? updates.textBody : existingTextValue;
-    const htmlBodyValue = updates.htmlBody !== undefined ? updates.htmlBody : existingHtmlValue;
+    // A replaced body is re-signed; an untouched one is carried over verbatim so
+    // an unrelated edit (subject only, say) never rewrites body content. Appending
+    // is idempotent, so a caller replaying an already-signed body stays single-signed.
+    const textBodyValue = updates.textBody !== undefined
+      ? appendTextSignature(updates.textBody, selectedIdentity.textSignature)
+      : existingTextValue;
+    const htmlBodyValue = updates.htmlBody !== undefined
+      ? appendHtmlSignature(updates.htmlBody, selectedIdentity.htmlSignature)
+      : existingHtmlValue;
 
     const emailObject: any = {
       mailboxIds: existingEmail.mailboxIds,
