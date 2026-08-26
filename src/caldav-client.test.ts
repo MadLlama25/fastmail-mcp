@@ -175,6 +175,24 @@ describe('formatICalDate', () => {
 });
 
 describe('parseCalendarObject', () => {
+  it('reads TRANSP when present, leaves it undefined otherwise', () => {
+    const make = (extra: string[]) => ({
+      url: '/cal/evt.ics',
+      data: ['BEGIN:VCALENDAR', 'BEGIN:VEVENT', 'UID:evt@fm', 'DTSTART:20260401T100000Z',
+        'DTEND:20260401T110000Z', 'SUMMARY:Meeting', ...extra, 'END:VEVENT', 'END:VCALENDAR'].join('\r\n'),
+    } as any);
+
+    assert.equal(parseCalendarObject(make(['TRANSP:TRANSPARENT'])).transparency, 'TRANSPARENT');
+    assert.equal(parseCalendarObject(make([])).transparency, undefined);
+    // DURATION path (no DTEND) also surfaces TRANSP
+    const durationObj = {
+      url: '/cal/evt.ics',
+      data: ['BEGIN:VCALENDAR', 'BEGIN:VEVENT', 'UID:evt@fm', 'DTSTART:20260401T100000Z',
+        'DURATION:PT1H', 'SUMMARY:Meeting', 'TRANSP:OPAQUE', 'END:VEVENT', 'END:VCALENDAR'].join('\r\n'),
+    } as any;
+    assert.equal(parseCalendarObject(durationObj).transparency, 'OPAQUE');
+  });
+
   it('parses a full calendar object with VTIMEZONE + VEVENT', () => {
     const data = [
       'BEGIN:VCALENDAR',
@@ -536,6 +554,30 @@ describe('CalDAVCalendarClient.updateCalendarEvent', () => {
     (client as any).client = mockDAVClient;
     return { client, mockDAVClient };
   }
+
+  it('sets, replaces and clears TRANSP', async () => {
+    const objects = [{ data: makeFullIcal('evt1@fm', 'T', '20260401T100000Z', '20260401T110000Z'), url: '/cal/evt1.ics' }];
+    const set = createMockedClientWithUpdateDelete(objects);
+    await set.client.updateCalendarEvent('evt1@fm', { transparency: 'TRANSPARENT' });
+    assert.ok(set.mockDAVClient.updateCalendarObject.mock.calls[0].arguments[0].calendarObject.data.includes('TRANSP:TRANSPARENT'));
+
+    const existing = [{ data: makeFullIcal('evt2@fm', 'T', '20260401T100000Z', '20260401T110000Z').replace('SUMMARY:T', 'SUMMARY:T\r\nTRANSP:TRANSPARENT'), url: '/cal/evt2.ics' }];
+    const replaced = createMockedClientWithUpdateDelete(existing);
+    await replaced.client.updateCalendarEvent('evt2@fm', { transparency: 'OPAQUE' });
+    const replacedData = replaced.mockDAVClient.updateCalendarObject.mock.calls[0].arguments[0].calendarObject.data;
+    assert.ok(replacedData.includes('TRANSP:OPAQUE'));
+    assert.ok(!replacedData.includes('TRANSP:TRANSPARENT'));
+
+    const cleared = createMockedClientWithUpdateDelete(existing);
+    await cleared.client.updateCalendarEvent('evt2@fm', { clearFields: ['transparency'] });
+    assert.ok(!cleared.mockDAVClient.updateCalendarObject.mock.calls[0].arguments[0].calendarObject.data.includes('TRANSP'));
+
+    const bad = createMockedClientWithUpdateDelete(objects);
+    await assert.rejects(
+      () => bad.client.updateCalendarEvent('evt1@fm', { transparency: 'BUSY' as any }),
+      /Invalid transparency/
+    );
+  });
 
   it('updates only the title, preserving other fields', async () => {
     const ical = makeFullIcal('evt1@fm', 'Original Title', '20260401T100000Z', '20260401T110000Z', 'My description', 'Room A');
@@ -1963,6 +2005,29 @@ describe('CalDAVCalendarClient.createCalendarEvent with participants', () => {
 
     const ical = mockDAVClient.createCalendarObject.mock.calls[0].arguments[0].iCalString;
     assert.ok(ical.endsWith('\r\n'));
+  });
+
+  it('emits TRANSP only when requested, and rejects invalid values', async () => {
+    const base = {
+      calendarId: 'Personal',
+      title: 'Test',
+      start: '2026-04-07T14:00:00Z',
+      end: '2026-04-07T15:00:00Z',
+    };
+
+    const noTransp = createMockedCreateClient();
+    await noTransp.client.createCalendarEvent(base);
+    assert.ok(!noTransp.mockDAVClient.createCalendarObject.mock.calls[0].arguments[0].iCalString.includes('TRANSP'));
+
+    const transparent = createMockedCreateClient();
+    await transparent.client.createCalendarEvent({ ...base, transparency: 'TRANSPARENT' });
+    assert.ok(transparent.mockDAVClient.createCalendarObject.mock.calls[0].arguments[0].iCalString.includes('TRANSP:TRANSPARENT\r\n'));
+
+    const bad = createMockedCreateClient();
+    await assert.rejects(
+      () => bad.client.createCalendarEvent({ ...base, transparency: 'TRANSPARENT\r\nSUMMARY:injected' as any }),
+      /Invalid transparency/
+    );
   });
 });
 

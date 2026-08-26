@@ -928,6 +928,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: 'string',
               description: 'Event location (optional)',
             },
+            transparency: {
+              type: 'string',
+              enum: ['OPAQUE', 'TRANSPARENT'],
+              description: 'Busy-time transparency (TRANSP, optional). OPAQUE blocks free/busy time, TRANSPARENT does not. Omitted means server default (OPAQUE).',
+            },
             participants: {
               type: 'array',
               items: {
@@ -974,6 +979,11 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: 'string',
               description: 'New event location',
             },
+            transparency: {
+              type: 'string',
+              enum: ['OPAQUE', 'TRANSPARENT'],
+              description: 'New busy-time transparency (TRANSP). OPAQUE blocks free/busy time, TRANSPARENT does not.',
+            },
             participants: {
               type: 'array',
               items: {
@@ -988,8 +998,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             clearFields: {
               type: 'array',
-              items: { type: 'string', enum: ['description', 'location'] },
-              description: 'Property names to delete from the event. Allowed: description, location. Cannot also pass the same field as a value.',
+              items: { type: 'string', enum: ['description', 'location', 'transparency'] },
+              description: 'Property names to delete from the event. Allowed: description, location, transparency. Cannot also pass the same field as a value.',
             },
             confirmRecurring: {
               type: 'boolean',
@@ -2076,7 +2086,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'create_calendar_event': {
-        const { calendarId, title, description, start, end, location, participants } = args as any;
+        const { calendarId, title, description, start, end, location, transparency, participants } = args as any;
         if (!calendarId || !title || !start || !end) {
           throw new McpError(ErrorCode.InvalidParams, 'calendarId, title, start, and end are required');
         }
@@ -2085,19 +2095,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           throw new McpError(ErrorCode.InvalidRequest, 'CalDAV not configured. Set FASTMAIL_CALDAV_USERNAME and FASTMAIL_CALDAV_PASSWORD.');
         }
         const eventId = await davClient.createCalendarEvent({
-          calendarId, title, description, start, end, location, participants,
+          calendarId, title, description, start, end, location, transparency, participants,
         });
         return { content: [{ type: 'text', text: `Calendar event created. Event ID: ${eventId}` }] };
       }
 
       case 'update_calendar_event': {
-        const { eventId, title, description, start, end, location, participants, clearFields, confirmRecurring } = args as any;
+        const { eventId, title, description, start, end, location, transparency, participants, clearFields, confirmRecurring } = args as any;
         if (!eventId) {
           throw new McpError(ErrorCode.InvalidParams, 'eventId is required');
         }
         const hasClearFields = Array.isArray(clearFields) && clearFields.length > 0;
-        if (title === undefined && description === undefined && start === undefined && end === undefined && location === undefined && participants === undefined && !hasClearFields) {
-          throw new McpError(ErrorCode.InvalidParams, 'At least one field to update must be provided (title, description, start, end, location, participants, or clearFields)');
+        if (title === undefined && description === undefined && start === undefined && end === undefined && location === undefined && transparency === undefined && participants === undefined && !hasClearFields) {
+          throw new McpError(ErrorCode.InvalidParams, 'At least one field to update must be provided (title, description, start, end, location, transparency, participants, or clearFields)');
         }
         const davClient = initializeCalDAVClient();
         if (!davClient) {
@@ -2107,7 +2117,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         // would otherwise read as truthy and authorize destructive pruning of
         // recurrence exceptions the caller explicitly declined to remove.
         const fields = {
-          title, description, start, end, location, participants, clearFields,
+          title, description, start, end, location, transparency, participants, clearFields,
           confirmRecurring: coerceBool(confirmRecurring) ?? false,
         };
         await davClient.updateCalendarEvent(eventId, fields);
