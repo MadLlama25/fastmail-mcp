@@ -5,7 +5,7 @@ import { CalDAVCalendarClient } from './caldav-client.js';
 
 const start = '2026-10-01T00:00:00Z';
 const end = '2026-11-01T00:00:00Z';
-const vevent = (...lines: string[]) => ['BEGIN:VEVENT', 'UID:series@example.test', ...lines, 'END:VEVENT'].join('\r\n');
+const vevent = (...lines: string[]) => ['BEGIN:VEVENT', 'UID:synthetic-recurring-series', ...lines, 'END:VEVENT'].join('\r\n');
 const calendar = (...events: string[]) => ['BEGIN:VCALENDAR', 'VERSION:2.0', ...events, 'END:VCALENDAR'].join('\r\n');
 const occurrence = (day: string, extra: string[] = []) => vevent(
   `RECURRENCE-ID:202610${day}T080000Z`, `DTSTART:202610${day}T080000Z`,
@@ -36,7 +36,7 @@ describe('bounded recurrence listing', () => {
     assert.deepEqual(events.map(e => e.start), ['2026-10-06T08:00:00Z', '2026-10-21T12:00:00Z', '2026-10-27T08:00:00Z']);
     assert.equal(events[1].recurrenceId, '2026-10-20T08:00:00Z');
     assert.equal(events[1].title, 'Moved lesson');
-    assert.ok(events.every(e => e.id === 'series@example.test'));
+    assert.ok(events.every(e => e.id === 'synthetic-recurring-series'));
     assert.ok(events.every(e => e.url === 'https://example.test/cal/series.ics'));
   });
 
