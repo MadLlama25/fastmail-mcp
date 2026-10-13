@@ -39,6 +39,9 @@ export interface CalendarEvent {
   start?: string;
   end?: string;
   location?: string;
+  /** Original occurrence time; id/url still identify the series for existing CRUD tools. */
+  recurrenceId?: string;
+  status?: string;
   organizer?: Participant;
   participants?: Participant[];
 }
@@ -1063,6 +1066,9 @@ export class CalDAVCalendarClient {
       );
     }
 
+    // Only expand explicitly bounded queries. Expanding a one-sided query with
+    // the legacy 1970/2099 defaults could materialize decades of occurrences.
+    const expandOccurrences = Boolean(startDate && endDate);
     const fetchOptions: any = {};
     if (startDate || endDate) {
       fetchOptions.timeRange = {
@@ -1071,13 +1077,34 @@ export class CalDAVCalendarClient {
       };
     }
 
+    if (expandOccurrences) fetchOptions.expand = true;
+
     const allEvents: CalendarEvent[] = [];
     for (const cal of targetCalendars) {
       const objects = await client.fetchCalendarObjects({ calendar: cal, ...fetchOptions });
       for (const obj of objects) {
-        allEvents.push(parseCalendarObject(obj));
+        if (!expandOccurrences) {
+          // Preserve the historical series-level result for unbounded queries.
+          allEvents.push(parseCalendarObject(obj));
+          continue;
+        }
+        // RFC 4791 section 9.6.5: the server applies RRULE/RDATE/EXDATE and
+        // overridden instances, converts zoned date-times to UTC, and returns
+        // one VEVENT per occurrence (possibly many in the same resource).
+        const vevents = (obj.data || '').match(/BEGIN:VEVENT[\s\S]*?END:VEVENT/g) || [];
+        for (const vevent of vevents) {
+          if (parseICalValue(vevent, 'RRULE') || parseICalValue(vevent, 'RDATE')) {
+            throw new Error('CalDAV server returned an unexpanded recurrence for a bounded query');
+          }
+          const status = parseICalValue(vevent, 'STATUS');
+          if (status?.toUpperCase() === 'CANCELLED') continue;
+          const event = parseCalendarObject({ ...obj, data: vevent });
+          const recurrenceId = formatICalDate(parseICalValue(vevent, 'RECURRENCE-ID'));
+          if (recurrenceId) event.recurrenceId = recurrenceId;
+          if (status) event.status = status;
+          allEvents.push(event);
+        }
       }
-      if (allEvents.length >= limit) break;
     }
 
     // Sort by start date ascending

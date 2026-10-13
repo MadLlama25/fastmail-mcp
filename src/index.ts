@@ -860,7 +860,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'list_calendar_events',
-        description: 'List events from a calendar',
+        description: 'List events from a calendar. Supply both startDate and endDate to expand recurring series into dated occurrences (including exceptions). With either bound missing, results remain series-level. Occurrences share the series id/url; recurrenceId identifies the original occurrence time, not a separate editable event.',
         inputSchema: {
           type: 'object',
           properties: {
