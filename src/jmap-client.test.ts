@@ -35,6 +35,25 @@ function stubMakeRequest(client: JmapClient, response: any) {
 
 // ---------- tests ----------
 
+describe('Masked Email capability availability', () => {
+  for (const hasSessionCapability of [false, true]) {
+    it(`rejects unavailable ownership on the selected mail account (session capability: ${hasSessionCapability})`, async () => {
+      const client = makeClient();
+      const capability = 'https://www.fastmail.com/dev/maskedemail';
+      mock.method(client, 'getSession', async () => ({
+        apiUrl: 'https://api.example.com/jmap/api/', accountId: ACCOUNT_ID,
+        capabilities: hasSessionCapability ? { [capability]: {} } : {},
+        accounts: { other: { accountCapabilities: { [capability]: {} } } },
+        primaryAccounts: { [capability]: 'other' },
+      }));
+      const requests = mock.method(client, 'makeRequest', async () => { throw new Error('Unexpected write or ownership lookup'); });
+      await assert.rejects(client.createDraft({ from: 'mask@example.com', subject: 'Draft' }), /ownership lookup is unavailable/);
+      await assert.rejects(client.sendEmail({ from: 'mask@example.com', to: ['recipient@example.com'], subject: 'Message', textBody: 'Body' }), /ownership lookup is unavailable/);
+      assert.equal(requests.mock.callCount(), 0);
+    });
+  }
+});
+
 describe('createDraft', () => {
   let client: JmapClient;
 

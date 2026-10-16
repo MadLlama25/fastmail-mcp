@@ -14,8 +14,10 @@ import { CalDAVCalendarClient } from './caldav-client.js';
 import { WebDAVFilesClient, filesAvailabilitySection } from './webdav-files-client.js';
 import { validateHttpsUrl } from './url-validation.js';
 import { coerceRecipients, coerceStringArray, coerceBool, redactBearerTokens, registerSecret } from './coerce.js';
+import { pathToFileURL } from 'node:url';
+import { realpathSync } from 'node:fs';
 
-const server = new Server(
+export const server = new Server(
   {
     name: 'fastmail-mcp',
     version: '1.13.4',
@@ -333,7 +335,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'send_email',
-        description: 'Send an email',
+        description: 'Send an email. An owned, active Masked Email from address without a matching sending identity creates a persistent sending identity before submission.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -356,7 +358,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             from: {
               type: 'string',
-              description: 'Sender email address (optional, defaults to account primary email)',
+              description: 'Verified identity or owned, active Masked Email address (optional, defaults to account primary email)',
             },
             mailboxId: {
               type: 'string',
@@ -410,7 +412,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'reply_email',
-        description: 'Reply to an existing email with proper threading headers (In-Reply-To, References). Automatically fetches the original email to build the reply chain. By default sends immediately; set send=false to save as a draft instead.',
+        description: 'Reply to an existing email with proper threading headers (In-Reply-To, References). Automatically fetches the original email to build the reply chain. By default sends immediately; set send=false to save as a draft instead. Sending from an owned, active Masked Email may create a persistent sending identity; saving a draft does not.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -435,7 +437,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             from: {
               type: 'string',
-              description: 'Sender email address (optional, defaults to account primary email)',
+              description: 'Verified identity or owned, active Masked Email address (optional, defaults to account primary email)',
             },
             textBody: {
               type: 'string',
@@ -496,7 +498,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             from: {
               type: 'string',
-              description: 'Sender email address (optional, defaults to account primary email)',
+              description: 'Verified identity or owned, active Masked Email address (optional, defaults to account primary email)',
             },
             mailboxId: {
               type: 'string',
@@ -574,7 +576,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             from: {
               type: 'string',
-              description: 'Updated sender email address (optional)',
+              description: 'Updated verified identity or owned, active Masked Email address (optional)',
             },
             subject: {
               type: 'string',
@@ -614,7 +616,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'send_draft',
-        description: 'Send an existing draft email. The draft must have recipients (to/cc/bcc) and a from address. After sending, the email is moved to the Sent folder and the draft keyword is removed.',
+        description: 'Send an existing draft email. The draft must have recipients (to/cc/bcc) and a from address. An owned, active Masked Email from address without a matching sending identity creates a persistent sending identity before submission. After sending, the email is moved to the Sent folder and the draft keyword is removed.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -2792,8 +2794,10 @@ async function runServer() {
   console.error('Fastmail MCP server running on stdio');
 }
 
-runServer().catch(() => {
-  // Avoid logging raw error objects to prevent accidental PII leakage
-  console.error('Fastmail MCP server failed to start');
-  process.exit(1);
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
+  runServer().catch(() => {
+    // Avoid logging raw error objects to prevent accidental PII leakage
+    console.error('Fastmail MCP server failed to start');
+    process.exit(1);
+  });
+}

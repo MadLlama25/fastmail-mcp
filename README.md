@@ -330,6 +330,30 @@ export FASTMAIL_WEBDAV_PASSWORD="app-password-with-files-scope"
 
 The URL must be HTTPS. Note: Fastmail Files ignores the WebDAV `If-None-Match` precondition, so the tool performs an explicit existence check before non-overwrite uploads.
 
+### Masked email authoring and sending
+
+Draft authoring and sending accept an explicit `from` address that matches a
+sending identity (including wildcard identities), or an owned Fastmail Masked
+Email address in the `enabled` or `disabled` state. Mask ownership is verified
+with [Fastmail's Masked Email API](https://www.fastmail.com/dev/#masked-email-api)
+on the mail account; received-message headers alone are not proof of ownership.
+If this API is unavailable or ownership cannot be verified, the operation fails
+before writing mail. Ordinary sending identities do not require this capability.
+
+`create_draft`, `edit_draft`, and `reply_email` with `send=false` do not create
+sending identities. Editing a reply draft preserves its `In-Reply-To` and
+`References` headers, including when the subject changes.
+
+On an explicit send (`send_email`, `send_draft`, or `reply_email` with `send=true`,
+which is the default), an owned mask without a matching identity first gets a
+persistent sending identity through standard JMAP `Identity/set`. This identity
+uses the masked address and an empty display name; it does not copy the primary
+identity's name, reply-to address, Bcc, or signatures. Later sends reuse it through
+`Identity/get`. The server must permit identity creation: a denial or missing
+returned identity ID stops before mail creation or submission. If a later send
+step fails, the newly created identity may remain for reuse. No mask is created,
+enabled, disabled, or deleted by these tools.
+
 ### Email attachments on send
 
 `send_email`, `create_draft`, `edit_draft`, and `reply_email` accept an `attachments` array. Each entry uses exactly one source:
