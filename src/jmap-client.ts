@@ -4,6 +4,8 @@ import { writeFile, mkdir, realpath, stat, lstat, unlink, readFile } from 'fs/pr
 import { dirname, resolve, normalize, sep, basename, join } from 'path';
 import { homedir } from 'os';
 
+const MASKED_EMAIL_CAPABILITY = 'https://www.fastmail.com/dev/maskedemail';
+
 export interface JmapSession {
   apiUrl: string;
   accountId: string;
@@ -12,6 +14,7 @@ export interface JmapSession {
   uploadUrl?: string;
   /** Per-capability primary account ids (e.g. contacts may differ from mail). */
   primaryAccounts?: Record<string, string>;
+  accounts?: Record<string, { accountCapabilities: Record<string, any> }>;
 }
 
 export interface JmapRequest {
@@ -247,6 +250,7 @@ export class JmapClient {
       downloadUrl: sessionData.downloadUrl,
       uploadUrl: sessionData.uploadUrl,
       primaryAccounts: sessionData.primaryAccounts,
+      accounts: sessionData.accounts,
     };
 
     return this.session;
@@ -523,6 +527,63 @@ export class JmapClient {
     return identities.find((id: any) => id.mayDelete === false) || identities[0];
   }
 
+  /** Verify authorship without treating received headers as proof of ownership. */
+  private async resolveSender(from?: string): Promise<{
+    from: { email: string; name?: string };
+    identityId?: string;
+  }> {
+    const identities = await this.getIdentities();
+    if (!identities?.length) throw new Error('No sending identities found');
+    const identity = from
+      ? identities.find(id => matchesIdentity(id.email, from))
+      : identities.find(id => id.mayDelete === false) || identities[0];
+    if (identity) return { from: { name: identity.name, email: from || identity.email }, identityId: identity.id };
+
+    const session = await this.getSession();
+    if (!session.capabilities[MASKED_EMAIL_CAPABILITY]
+      || !session.accounts?.[session.accountId]?.accountCapabilities?.[MASKED_EMAIL_CAPABILITY]) {
+      throw new Error('From address is not verified for sending. Masked Email ownership lookup is unavailable; choose one of your verified identities.');
+    }
+    const response = await this.makeRequest({
+      using: ['urn:ietf:params:jmap:core', MASKED_EMAIL_CAPABILITY],
+      methodCalls: [['MaskedEmail/get', { accountId: session.accountId }, 'maskedEmails']],
+    });
+    const result = this.getMethodResult(response, 0);
+    if (response.methodResponses[0][0] !== 'MaskedEmail/get'
+      || result?.accountId !== session.accountId || !Array.isArray(result.list)) {
+      throw new Error('Could not verify Masked Email ownership: invalid MaskedEmail/get response');
+    }
+    const ownedMask = result.list.find((mask: any) =>
+      typeof mask?.email === 'string' && mask.email.toLowerCase() === from!.toLowerCase()
+      && (mask.state === 'enabled' || mask.state === 'disabled'));
+    if (!ownedMask) {
+      throw new Error('From address is not verified for sending. Choose a verified identity or an owned, active Masked Email address.');
+    }
+    // A mask has no display name; never expose the primary identity's name here.
+    return { from: { email: from! } };
+  }
+
+  private async createMaskedSendingIdentity(from: string): Promise<string> {
+    const session = await this.getSession();
+    const identityResponse = await this.makeRequest({
+      using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:submission'],
+      methodCalls: [['Identity/set', {
+        accountId: session.accountId,
+        create: { maskedSender: { email: from, name: '' } },
+      }, 'createMaskedIdentity']],
+    });
+    const identityResult = this.getMethodResult(identityResponse, 0);
+    const error = identityResult.notCreated?.maskedSender;
+    if (error) {
+      throw new Error(`Failed to create Masked Email sending identity: ${error.type}${error.description ? ' - ' + error.description : ''}`);
+    }
+    const identityId = identityResult.created?.maskedSender?.id;
+    if (!identityId || typeof identityId !== 'string') {
+      throw new Error('Masked Email sending identity creation returned no identity ID');
+    }
+    return identityId;
+  }
+
   async sendEmail(email: {
     to: string[];
     cc?: string[];
@@ -540,27 +601,8 @@ export class JmapClient {
   }): Promise<string> {
     const session = await this.getSession();
 
-    // Get all identities to validate from address
-    const identities = await this.getIdentities();
-    if (!identities || identities.length === 0) {
-      throw new Error('No sending identities found');
-    }
-
-    // Determine which identity to use
-    let selectedIdentity;
-    if (email.from) {
-      // Validate that the from address matches an available identity
-      selectedIdentity = identities.find(id => matchesIdentity(id.email, email.from!));
-      if (!selectedIdentity) {
-        throw new Error('From address is not verified for sending. Choose one of your verified identities.');
-      }
-    } else {
-      // Use default identity
-      selectedIdentity = identities.find(id => id.mayDelete === false) || identities[0];
-    }
-
-    // Use the requested from address (not the identity email, which may be a wildcard like *@domain)
-    const fromEmail = email.from || selectedIdentity.email;
+    const sender = await this.resolveSender(email.from);
+    const fromEmail = sender.from.email;
 
     // Get the mailbox IDs we need
     const mailboxes = await this.getMailboxes();
@@ -594,10 +636,12 @@ export class JmapClient {
       ? await this.resolveAttachments(email.attachments, email.downloadDir)
       : undefined;
 
+    const identityId = sender.identityId || await this.createMaskedSendingIdentity(fromEmail);
+
     const emailObject = {
       mailboxIds: initialMailboxIds,
       keywords: { $draft: true },
-      from: [{ name: selectedIdentity.name, email: fromEmail }],
+      from: [sender.from],
       to: email.to.map(addr => ({ email: addr })),
       cc: email.cc?.map(addr => ({ email: addr })) || [],
       bcc: email.bcc?.map(addr => ({ email: addr })) || [],
@@ -629,7 +673,7 @@ export class JmapClient {
           create: {
             submission: {
               emailId: '#draft',
-              identityId: selectedIdentity.id,
+              identityId,
               envelope: {
                 mailFrom: { email: fromEmail },
                 rcptTo: [
@@ -699,23 +743,7 @@ export class JmapClient {
       throw new Error('At least one of to, subject, textBody, htmlBody, or attachments must be provided');
     }
 
-    // Get all identities to resolve from address
-    const identities = await this.getIdentities();
-    if (!identities || identities.length === 0) {
-      throw new Error('No sending identities found');
-    }
-
-    let selectedIdentity;
-    if (email.from) {
-      selectedIdentity = identities.find(id => matchesIdentity(id.email, email.from!));
-      if (!selectedIdentity) {
-        throw new Error('From address is not verified for sending. Choose one of your verified identities.');
-      }
-    } else {
-      selectedIdentity = identities.find(id => id.mayDelete === false) || identities[0];
-    }
-
-    const fromEmail = email.from || selectedIdentity.email;
+    const sender = await this.resolveSender(email.from);
 
     // Resolve drafts mailbox
     let draftMailboxId: string;
@@ -736,7 +764,7 @@ export class JmapClient {
     const emailObject: any = {
       mailboxIds,
       keywords: { $draft: true },
-      from: [{ name: selectedIdentity.name, email: fromEmail }],
+      from: [sender.from],
     };
 
     if (email.to?.length) emailObject.to = email.to.map(addr => ({ email: addr }));
@@ -809,7 +837,7 @@ export class JmapClient {
         ['Email/get', {
           accountId: session.accountId,
           ids: [emailId],
-          properties: ['id', 'subject', 'from', 'to', 'cc', 'bcc', 'replyTo', 'textBody', 'htmlBody', 'bodyValues', 'mailboxIds', 'keywords', 'attachments'],
+          properties: ['id', 'subject', 'from', 'to', 'cc', 'bcc', 'replyTo', 'inReplyTo', 'references', 'textBody', 'htmlBody', 'bodyValues', 'mailboxIds', 'keywords', 'attachments'],
           bodyProperties: ['partId', 'blobId', 'type', 'size', 'name', 'disposition', 'cid'],
           fetchTextBodyValues: true,
           fetchHTMLBodyValues: true,
@@ -828,28 +856,7 @@ export class JmapClient {
       throw new Error('Cannot edit a non-draft email');
     }
 
-    // Resolve identity
-    const identities = await this.getIdentities();
-    if (!identities || identities.length === 0) {
-      throw new Error('No sending identities found');
-    }
-
-    let selectedIdentity;
-    if (updates.from) {
-      selectedIdentity = identities.find(id => matchesIdentity(id.email, updates.from!));
-      if (!selectedIdentity) {
-        throw new Error('From address is not verified for sending. Choose one of your verified identities.');
-      }
-    } else {
-      // Use existing from, or fall back to default identity
-      const existingFrom = existingEmail.from?.[0]?.email;
-      if (existingFrom) {
-        selectedIdentity = identities.find(id => matchesIdentity(id.email, existingFrom))
-          || identities.find(id => id.mayDelete === false) || identities[0];
-      } else {
-        selectedIdentity = identities.find(id => id.mayDelete === false) || identities[0];
-      }
-    }
+    const sender = await this.resolveSender(updates.from || existingEmail.from?.[0]?.email);
 
     // Extract existing body values by MIME type, keyed into bodyValues by partId.
     //
@@ -885,11 +892,13 @@ export class JmapClient {
     const emailObject: any = {
       mailboxIds: existingEmail.mailboxIds,
       keywords: { $draft: true },
-      from: [{ name: selectedIdentity.name, email: updates.from || existingEmail.from?.[0]?.email || selectedIdentity.email }],
+      from: [sender.from],
       to: mergedTo,
       cc: mergedCc,
       bcc: mergedBcc,
       subject: mergedSubject,
+      ...(existingEmail.inReplyTo?.length && { inReplyTo: existingEmail.inReplyTo }),
+      ...(existingEmail.references?.length && { references: existingEmail.references }),
       ...(mergedReplyTo?.length && { replyTo: mergedReplyTo }),
     };
 
@@ -989,11 +998,7 @@ export class JmapClient {
       throw new Error('Draft has no from address');
     }
 
-    const identities = await this.getIdentities();
-    const selectedIdentity = identities.find(id => matchesIdentity(id.email, fromEmail));
-    if (!selectedIdentity) {
-      throw new Error('From address on draft does not match any sending identity');
-    }
+    const sender = await this.resolveSender(fromEmail);
 
     // Find the Sent mailbox
     const mailboxes = await this.getMailboxes();
@@ -1001,6 +1006,8 @@ export class JmapClient {
     if (!sentMailbox) {
       throw new Error('Could not find Sent mailbox');
     }
+
+    const identityId = sender.identityId || await this.createMaskedSendingIdentity(fromEmail);
 
     const sentMailboxIds: Record<string, boolean> = {};
     sentMailboxIds[sentMailbox.id] = true;
@@ -1014,7 +1021,7 @@ export class JmapClient {
           create: {
             submission: {
               emailId,
-              identityId: selectedIdentity.id,
+              identityId,
               envelope: {
                 mailFrom: { email: fromEmail },
                 rcptTo: allRecipients.map(addr => ({ email: addr.email })),
