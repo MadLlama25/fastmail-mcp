@@ -165,7 +165,7 @@ You can install this server as a Desktop Extension for Claude Desktop using the 
   - Parameters: `originalEmailId` (required), `to` (optional array, defaults to original sender), `cc` (optional array), `bcc` (optional array), `from` (optional), `textBody` (optional), `htmlBody` (optional), `send` (optional boolean, default: true), `replyTo` (optional array), `attachments` (optional array — see [Email attachments on send](#email-attachments-on-send))
 - **create_draft**: Create an email draft (at least one of to/subject/body/attachments required; supports threading headers for reply drafts)
   - Parameters: `to` (optional array), `cc` (optional array), `bcc` (optional array), `from` (optional), `mailboxId` (optional), `subject` (optional), `textBody` (optional), `htmlBody` (optional), `replyTo` (optional array), `inReplyTo` (optional array), `references` (optional array), `attachments` (optional array — see [Email attachments on send](#email-attachments-on-send))
-- **edit_draft**: Edit an existing draft in place — only provided fields change; existing attachments are preserved
+- **edit_draft**: Save an updated replacement before deleting the original draft — only provided fields change; existing attachments are preserved. Returns the replacement's new email ID. State checks reject concurrent changes; if saving succeeds but cleanup fails, the error includes the replacement ID. Inspect both drafts rather than automatically repeating the edit.
   - Parameters: `emailId` (required), `to`, `cc`, `bcc`, `from`, `subject`, `textBody`, `htmlBody`, `replyTo`, `attachments` (all optional)
 - **send_draft**: Send an existing draft
   - Parameters: `emailId` (required)

@@ -549,7 +549,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'edit_draft',
-        description: 'Edit an existing draft email. Since JMAP emails are immutable, this atomically destroys the old draft and creates a new one with the updated fields. Only fields you provide will be changed; others are preserved from the original draft.',
+        description: 'Edit an existing draft email by saving a replacement before deleting the original. Only fields you provide will be changed; others are preserved. Concurrent changes can leave both drafts. If cleanup fails, the error includes the saved replacement ID: inspect both drafts instead of automatically repeating the edit.',
         inputSchema: {
           type: 'object',
           properties: {
