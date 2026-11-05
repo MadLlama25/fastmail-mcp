@@ -39,6 +39,8 @@ export interface CalendarEvent {
   start?: string;
   end?: string;
   location?: string;
+  transparency?: string;   // TRANSP: OPAQUE or TRANSPARENT
+  timeZone?: string;       // TZID of DTSTART; absent for UTC, floating and all-day times
   organizer?: Participant;
   participants?: Participant[];
 }
@@ -57,6 +59,36 @@ export function resolveDisplayName(raw: string | undefined, fallback: string): s
   const trimmed = raw?.trim();
   if (!trimmed || /\$\{[^}]+\}/.test(trimmed)) return fallback;
   return trimmed;
+}
+
+/**
+ * Validate a caller-supplied TRANSP value (RFC 5545 §3.8.2.7). Whitelisted so
+ * nothing caller-supplied can inject extra lines into the iCal body.
+ */
+export function normalizeTransparency(value: string): 'OPAQUE' | 'TRANSPARENT' {
+  const transp = value.toUpperCase();
+  if (transp !== 'OPAQUE' && transp !== 'TRANSPARENT') {
+    throw new Error(`Invalid transparency: ${value}. Expected OPAQUE or TRANSPARENT`);
+  }
+  return transp;
+}
+
+/**
+ * Validate a caller-supplied IANA time zone and return its canonical name.
+ * Charset check rejects offset zones like "+01:00" (Intl accepts them, but they
+ * are not TZIDs) and anything that could break out of the TZID parameter.
+ */
+export function normalizeTimeZone(value: string): string {
+  let tz: string;
+  try {
+    tz = new Intl.DateTimeFormat('en-US', { timeZone: value }).resolvedOptions().timeZone;
+  } catch {
+    throw new Error(`Invalid timeZone: ${value}. Expected an IANA name like Europe/London`);
+  }
+  if (!/^[A-Za-z][A-Za-z0-9_+\-\/]*$/.test(tz)) {
+    throw new Error(`Invalid timeZone: ${value}. Expected an IANA name like Europe/London`);
+  }
+  return tz;
 }
 
 export function extractVEvent(data: string): string | null {
@@ -639,6 +671,9 @@ export function parseCalendarObject(obj: DAVCalendarObject, options?: { includeP
   const rawStart = parseICalValue(vevent, 'DTSTART');
   let rawEnd = parseICalValue(vevent, 'DTEND');
   const location = parseICalValue(vevent, 'LOCATION');
+  const transparency = parseICalValue(vevent, 'TRANSP');
+  const tzMatch = parseAllICalProperties(vevent, 'DTSTART')[0]?.match(/;TZID=("[^"]*"|[^;:]+)/);
+  const timeZone = tzMatch ? tzMatch[1].replace(/^"|"$/g, '') : undefined;
   const uid = parseICalValue(vevent, 'UID') || obj.url || '';
 
   // DURATION parsing: compute end from start + duration if DTEND absent
@@ -658,6 +693,8 @@ export function parseCalendarObject(obj: DAVCalendarObject, options?: { includeP
             start: formatICalDate(rawStart),
             end: computedEnd,
             location: location ? unescapeICalText(location) : undefined,
+            transparency,
+            timeZone,
           };
           if (options?.includeParticipants) {
             addParticipantsToEvent(event, vevent);
@@ -676,6 +713,8 @@ export function parseCalendarObject(obj: DAVCalendarObject, options?: { includeP
     start: formatICalDate(rawStart),
     end: formatICalDate(rawEnd),
     location: location ? unescapeICalText(location) : undefined,
+    transparency,
+    timeZone,
   };
 
   if (options?.includeParticipants) {
@@ -851,12 +890,14 @@ export function quoteParamValue(value: string): string {
  * 1. Date-only (2026-04-01) → DTXXX;VALUE=DATE:20260401
  * 2. Floating time (2026-03-20T09:30:00) → preserve original TZID
  * 3. UTC/offset (2026-03-20T09:30:00Z) → DTXXX:20260320T093000Z
+ * An explicit (normalized) timeZone tags floating times with that TZID instead of case 2.
  */
 function formatDateTimeProperty(
   propName: string,
   value: string,
   originalVevent: string | null,
-  lineEnding: string
+  lineEnding: string,
+  timeZone?: string
 ): { line: string; isDateOnly: boolean } {
   // Same guard as validateAndFormatICalDate (v1.9.3): reject control characters
   // outright so a hostile value can never reach the property-serialization paths.
@@ -867,7 +908,7 @@ function formatDateTimeProperty(
     throw new Error(`${propName} contains control characters`);
   }
 
-  // Date-only
+  // Date-only (timeZone is ignored: all-day values cannot carry a TZID)
   if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
     const d = new Date(value);
     if (isNaN(d.getTime()) || !d.toISOString().startsWith(value)) {
@@ -880,6 +921,9 @@ function formatDateTimeProperty(
   // Floating time (no offset, no Z)
   if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(value)) {
     const icalTime = value.replace(/[-:]/g, '');
+    if (timeZone) {
+      return { line: foldICalLine(`${propName};TZID=${timeZone}:${icalTime}`, lineEnding), isDateOnly: false };
+    }
     // Try to preserve original TZID
     if (originalVevent) {
       const rawLines = parseAllICalProperties(originalVevent, propName);
@@ -905,6 +949,9 @@ function formatDateTimeProperty(
   }
 
   // UTC or offset — convert to UTC
+  if (timeZone) {
+    throw new Error(`${propName}: timeZone requires a local time without Z or offset (e.g. 2026-04-07T09:00:00), got ${value}`);
+  }
   return { line: foldICalLine(`${propName}:${toICalUTC(value)}`, lineEnding), isDateOnly: false };
 }
 
@@ -1126,6 +1173,8 @@ export class CalDAVCalendarClient {
     start: string;
     end: string;
     location?: string;
+    transparency?: 'OPAQUE' | 'TRANSPARENT';
+    timeZone?: string;
     participants?: Array<{ email: string; name?: string }>;
   }): Promise<string> {
     const client = await this.getClient();
@@ -1145,8 +1194,9 @@ export class CalDAVCalendarClient {
     const now = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
 
     // Format start/end with all-day event support
-    const startResult = formatDateTimeProperty('DTSTART', event.start, null, '\r\n');
-    const endResult = formatDateTimeProperty('DTEND', event.end, null, '\r\n');
+    const timeZone = event.timeZone ? normalizeTimeZone(event.timeZone) : undefined;
+    const startResult = formatDateTimeProperty('DTSTART', event.start, null, '\r\n', timeZone);
+    const endResult = formatDateTimeProperty('DTEND', event.end, null, '\r\n', timeZone);
 
     // Value type consistency check
     validateDateConsistency(
@@ -1174,6 +1224,11 @@ export class CalDAVCalendarClient {
     }
     if (event.location) {
       icalLines.push(foldICalLine(`LOCATION:${escapeICalText(event.location)}`));
+    }
+    // TRANSP (RFC 5545 §3.8.2.7) — whitelist the two legal values so nothing
+    // caller-supplied can be injected into the iCal body.
+    if (event.transparency) {
+      icalLines.push(`TRANSP:${normalizeTransparency(event.transparency)}`);
     }
 
     // Participant support
@@ -1221,6 +1276,8 @@ export class CalDAVCalendarClient {
     start?: string;
     end?: string;
     location?: string;
+    transparency?: 'OPAQUE' | 'TRANSPARENT';
+    timeZone?: string;
     participants?: Array<{ email: string; name?: string }>;
     clearFields?: string[];
     confirmRecurring?: boolean;
@@ -1244,13 +1301,19 @@ export class CalDAVCalendarClient {
     if (fields.end !== undefined && !datePattern.test(fields.end) && !dateTimePattern.test(fields.end)) {
       throw new Error(`Invalid end date format: ${fields.end}. Expected ISO 8601 (e.g. 2026-04-07T14:00:00Z or 2026-04-07)`);
     }
+    // timeZone only tags the start/end passed in this call; it never re-tags existing times.
+    if (fields.timeZone !== undefined && fields.start === undefined && fields.end === undefined) {
+      throw new Error('timeZone requires start and/or end in the same update');
+    }
+    const timeZone = fields.timeZone !== undefined ? normalizeTimeZone(fields.timeZone) : undefined;
 
     // Validate clearFields: only the optional, string-settable, not-otherwise-
     // clearable fields may be cleared, and a field can't be both set and cleared.
-    const CLEARABLE_FIELDS = new Set(['description', 'location']);
+    const CLEARABLE_FIELDS = new Set(['description', 'location', 'transparency']);
     const providedStringFields = new Set<string>();
     if (fields.description !== undefined) providedStringFields.add('description');
     if (fields.location !== undefined) providedStringFields.add('location');
+    if (fields.transparency !== undefined) providedStringFields.add('transparency');
     validateClearFields(fields.clearFields, CLEARABLE_FIELDS, providedStringFields);
 
     const lineEnding = detectLineEnding(obj.data);
@@ -1369,14 +1432,14 @@ export class CalDAVCalendarClient {
     }
 
     if (fields.start !== undefined) {
-      const result = formatDateTimeProperty('DTSTART', fields.start, originalVevent, lineEnding);
+      const result = formatDateTimeProperty('DTSTART', fields.start, originalVevent, lineEnding, timeZone);
       data = replaceICalProperty(data, 'DTSTART', result.line);
       startIsDateOnly = result.isDateOnly;
       timeChanged = true;
     }
 
     if (fields.end !== undefined) {
-      const result = formatDateTimeProperty('DTEND', fields.end, originalVevent, lineEnding);
+      const result = formatDateTimeProperty('DTEND', fields.end, originalVevent, lineEnding, timeZone);
       data = replaceICalProperty(data, 'DTEND', result.line);
       endIsDateOnly = result.isDateOnly;
       // Remove DURATION — DTEND and DURATION are mutually exclusive (RFC 5545 §3.6.1)
@@ -1406,9 +1469,13 @@ export class CalDAVCalendarClient {
       data = replaceICalProperty(data, 'LOCATION', fold(`LOCATION:${escapeICalText(location)}`));
     }
 
+    if (fields.transparency !== undefined) {
+      data = replaceICalProperty(data, 'TRANSP', `TRANSP:${normalizeTransparency(fields.transparency)}`);
+    }
+
     // Clear requested fields by removing the property line entirely.
     if (fields.clearFields && fields.clearFields.length > 0) {
-      const KEY_BY_FIELD: Record<string, string> = { description: 'DESCRIPTION', location: 'LOCATION' };
+      const KEY_BY_FIELD: Record<string, string> = { description: 'DESCRIPTION', location: 'LOCATION', transparency: 'TRANSP' };
       for (const field of fields.clearFields) {
         data = replaceICalProperty(data, KEY_BY_FIELD[field], null);
       }
