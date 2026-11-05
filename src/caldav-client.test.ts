@@ -175,6 +175,17 @@ describe('formatICalDate', () => {
 });
 
 describe('parseCalendarObject', () => {
+  it('reads timeZone from DTSTART TZID (quoted or not), undefined for UTC', () => {
+    const make = (dtstart: string) => ({
+      url: '/cal/evt.ics',
+      data: ['BEGIN:VCALENDAR', 'BEGIN:VEVENT', 'UID:evt@fm', dtstart,
+        'SUMMARY:Meeting', 'END:VEVENT', 'END:VCALENDAR'].join('\r\n'),
+    } as any);
+    assert.equal(parseCalendarObject(make('DTSTART;TZID=Europe/Rome:20260320T083000')).timeZone, 'Europe/Rome');
+    assert.equal(parseCalendarObject(make('DTSTART;TZID="Europe/Rome":20260320T083000')).timeZone, 'Europe/Rome');
+    assert.equal(parseCalendarObject(make('DTSTART:20260320T083000Z')).timeZone, undefined);
+  });
+
   it('reads TRANSP when present, leaves it undefined otherwise', () => {
     const make = (extra: string[]) => ({
       url: '/cal/evt.ics',
@@ -554,6 +565,20 @@ describe('CalDAVCalendarClient.updateCalendarEvent', () => {
     (client as any).client = mockDAVClient;
     return { client, mockDAVClient };
   }
+
+  it('sets TZID on updated times only when start/end are given', async () => {
+    const ical = makeFullIcal('evt1@fm', 'T', '20260401T100000Z', '20260401T110000Z');
+    const set = createMockedClientWithUpdateDelete([{ data: ical, url: '/cal/evt1.ics' }]);
+    await set.client.updateCalendarEvent('evt1@fm', { start: '2026-04-01T09:00:00', end: '2026-04-01T10:00:00', timeZone: 'America/New_York' });
+    const data = set.mockDAVClient.updateCalendarObject.mock.calls[0].arguments[0].calendarObject.data;
+    assert.ok(data.includes('DTSTART;TZID=America/New_York:20260401T090000'));
+    assert.ok(data.includes('DTEND;TZID=America/New_York:20260401T100000'));
+
+    await assert.rejects(
+      () => createMockedClientWithUpdateDelete([{ data: ical, url: '/cal/evt1.ics' }]).client.updateCalendarEvent('evt1@fm', { timeZone: 'America/New_York' }),
+      /timeZone requires start and\/or end/
+    );
+  });
 
   it('sets, replaces and clears TRANSP', async () => {
     const objects = [{ data: makeFullIcal('evt1@fm', 'T', '20260401T100000Z', '20260401T110000Z'), url: '/cal/evt1.ics' }];
@@ -2027,6 +2052,28 @@ describe('CalDAVCalendarClient.createCalendarEvent with participants', () => {
     await assert.rejects(
       () => bad.client.createCalendarEvent({ ...base, transparency: 'TRANSPARENT\r\nSUMMARY:injected' as any }),
       /Invalid transparency/
+    );
+  });
+
+  it('tags local start/end with the requested TZID and rejects bad zones', async () => {
+    const base = { calendarId: 'Personal', title: 'Test', start: '2026-04-07T09:00:00', end: '2026-04-07T10:00:00' };
+
+    const zoned = createMockedCreateClient();
+    await zoned.client.createCalendarEvent({ ...base, timeZone: 'europe/london' });
+    const ical = zoned.mockDAVClient.createCalendarObject.mock.calls[0].arguments[0].iCalString;
+    assert.ok(ical.includes('DTSTART;TZID=Europe/London:20260407T090000\r\n'), 'canonical TZID on DTSTART');
+    assert.ok(ical.includes('DTEND;TZID=Europe/London:20260407T100000\r\n'), 'canonical TZID on DTEND');
+
+    const allDay = createMockedCreateClient();
+    await allDay.client.createCalendarEvent({ ...base, start: '2026-04-07', end: '2026-04-08', timeZone: 'Europe/London' });
+    assert.ok(allDay.mockDAVClient.createCalendarObject.mock.calls[0].arguments[0].iCalString.includes('DTSTART;VALUE=DATE:20260407'));
+
+    for (const timeZone of ['Bogus/Zone', '+01:00', 'Europe/London\r\nSUMMARY:injected']) {
+      await assert.rejects(() => createMockedCreateClient().client.createCalendarEvent({ ...base, timeZone }), /Invalid timeZone/);
+    }
+    await assert.rejects(
+      () => createMockedCreateClient().client.createCalendarEvent({ ...base, start: '2026-04-07T09:00:00Z', timeZone: 'Europe/London' }),
+      /timeZone requires a local time/
     );
   });
 });
