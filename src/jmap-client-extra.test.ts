@@ -1310,8 +1310,11 @@ describe('attachments on send', () => {
     const client = makeUploadClient();
     mock.method(client, 'getIdentities', async () => [IDENTITY]);
     const makeReq = mock.method(client, 'makeRequest', async (req: any) => {
+      if (req.methodCalls[0][1].destroy) {
+        return { methodResponses: [['Email/set', { destroyed: ['d1'] }, 'removeOriginalDraft']] };
+      }
       if (req.methodCalls[0][0] === 'Email/get') {
-        return { methodResponses: [['Email/get', { list: [{
+        return { methodResponses: [['Email/get', { state: 'state-before', list: [{
           id: 'd1', subject: 'Draft', keywords: { $draft: true }, mailboxIds: { 'mb-drafts': true },
           from: [{ email: 'me@example.com' }],
           textBody: [{ partId: 't1', type: 'text/plain' }],
@@ -1319,7 +1322,7 @@ describe('attachments on send', () => {
           attachments: [{ blobId: 'B-keep', type: 'image/png', name: 'pic.png', disposition: 'attachment' }],
         }] }, 'getEmail']] };
       }
-      return { methodResponses: [['Email/set', { created: { draft: { id: 'd2' } } }, 'updateDraft']] };
+      return { methodResponses: [['Email/set', { newState: 'state-created', created: { draft: { id: 'd2' } } }, 'updateDraft']] };
     });
 
     await client.updateDraft('d1', { subject: 'Edited subject only' });
@@ -1333,12 +1336,15 @@ describe('attachments on send', () => {
     const client = makeUploadClient();
     mock.method(client, 'getIdentities', async () => [IDENTITY]);
     const makeReq = mock.method(client, 'makeRequest', async (req: any) => {
+      if (req.methodCalls[0][1].destroy) {
+        return { methodResponses: [['Email/set', { destroyed: ['d1'] }, 'removeOriginalDraft']] };
+      }
       if (req.methodCalls[0][0] === 'Email/get') {
-        return { methodResponses: [['Email/get', { list: [{
+        return { methodResponses: [['Email/get', { state: 'state-before', list: [{
           id: 'd1', keywords: { $draft: true }, mailboxIds: { 'mb-drafts': true }, from: [{ email: 'me@example.com' }],
         }] }, 'getEmail']] };
       }
-      return { methodResponses: [['Email/set', { created: { draft: { id: 'd2' } } }, 'updateDraft']] };
+      return { methodResponses: [['Email/set', { newState: 'state-created', created: { draft: { id: 'd2' } } }, 'updateDraft']] };
     });
     await client.updateDraft('d1', { subject: 'x' });
     const props = makeReq.mock.calls[0].arguments[0].methodCalls[0][1].properties;

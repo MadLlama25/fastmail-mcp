@@ -320,30 +320,42 @@ describe('updateDraft', () => {
 
   it('returns new email ID on success', async () => {
     const makeReq = mock.method(client, 'makeRequest', async (req: any) => {
+      if (req.methodCalls[0][1].destroy) {
+        return { methodResponses: [['Email/set', { destroyed: ['draft-1'] }, 'removeOriginalDraft']] };
+      }
       // First call: Email/get to fetch existing draft
       if (req.methodCalls[0][0] === 'Email/get') {
-        return { methodResponses: [['Email/get', { list: [EXISTING_DRAFT] }, 'getEmail']] };
+        return { methodResponses: [['Email/get', { state: 'state-before', list: [EXISTING_DRAFT] }, 'getEmail']] };
       }
-      // Second call: Email/set with create+destroy
-      return { methodResponses: [['Email/set', { created: { draft: { id: 'draft-2' } }, destroyed: ['draft-1'] }, 'updateDraft']] };
+      // Second call: create the replacement without deleting the original
+      return { methodResponses: [['Email/set', { newState: 'state-created', created: { draft: { id: 'draft-2' } } }, 'updateDraft']] };
     });
 
     const newId = await client.updateDraft('draft-1', { subject: 'New Subject' });
     assert.equal(newId, 'draft-2');
 
-    // Verify the second call has both create and destroy
+    // Creation and cleanup must be separate, state-guarded requests
     const setCall = makeReq.mock.calls[1].arguments[0];
     assert.equal(setCall.methodCalls[0][0], 'Email/set');
-    assert.deepEqual(setCall.methodCalls[0][1].destroy, ['draft-1']);
+    assert.equal(setCall.methodCalls[0][1].destroy, undefined);
+    assert.equal(setCall.methodCalls[0][1].ifInState, 'state-before');
+    const cleanup = makeReq.mock.calls[2].arguments[0].methodCalls[0][1];
+    assert.deepEqual(cleanup.destroy, ['draft-1']);
+    assert.equal(cleanup.ifInState, 'state-created');
+    assert.equal(cleanup.create, undefined);
+    assert.equal(makeReq.mock.calls.length, 3);
     assert.equal(setCall.methodCalls[0][1].create.draft.subject, 'New Subject');
   });
 
   it('merges fields — preserves existing values for unspecified fields', async () => {
     mock.method(client, 'makeRequest', async (req: any) => {
-      if (req.methodCalls[0][0] === 'Email/get') {
-        return { methodResponses: [['Email/get', { list: [EXISTING_DRAFT] }, 'getEmail']] };
+      if (req.methodCalls[0][1].destroy) {
+        return { methodResponses: [['Email/set', { destroyed: ['draft-1'] }, 'removeOriginalDraft']] };
       }
-      return { methodResponses: [['Email/set', { created: { draft: { id: 'draft-2' } }, destroyed: ['draft-1'] }, 'updateDraft']] };
+      if (req.methodCalls[0][0] === 'Email/get') {
+        return { methodResponses: [['Email/get', { state: 'state-before', list: [EXISTING_DRAFT] }, 'getEmail']] };
+      }
+      return { methodResponses: [['Email/set', { newState: 'state-created', created: { draft: { id: 'draft-2' } } }, 'updateDraft']] };
     });
 
     await client.updateDraft('draft-1', { subject: 'Updated' });
@@ -358,7 +370,7 @@ describe('updateDraft', () => {
   it('rejects non-draft email', async () => {
     const nonDraft = { ...EXISTING_DRAFT, keywords: { $seen: true } };
     mock.method(client, 'makeRequest', async () => ({
-      methodResponses: [['Email/get', { list: [nonDraft] }, 'getEmail']],
+      methodResponses: [['Email/get', { state: 'state-before', list: [nonDraft] }, 'getEmail']],
     }));
 
     await assert.rejects(
@@ -372,7 +384,7 @@ describe('updateDraft', () => {
 
   it('throws when email not found', async () => {
     mock.method(client, 'makeRequest', async () => ({
-      methodResponses: [['Email/get', { list: [] }, 'getEmail']],
+      methodResponses: [['Email/get', { state: 'state-before', list: [] }, 'getEmail']],
     }));
 
     await assert.rejects(
@@ -384,10 +396,13 @@ describe('updateDraft', () => {
     );
   });
 
-  it('throws on JMAP error during create+destroy', async () => {
+  it('throws on JMAP error during replacement creation', async () => {
     mock.method(client, 'makeRequest', async (req: any) => {
+      if (req.methodCalls[0][1].destroy) {
+        return { methodResponses: [['Email/set', { destroyed: ['draft-1'] }, 'removeOriginalDraft']] };
+      }
       if (req.methodCalls[0][0] === 'Email/get') {
-        return { methodResponses: [['Email/get', { list: [EXISTING_DRAFT] }, 'getEmail']] };
+        return { methodResponses: [['Email/get', { state: 'state-before', list: [EXISTING_DRAFT] }, 'getEmail']] };
       }
       return { methodResponses: [['error', { type: 'serverFail', description: 'oops' }, 'updateDraft']] };
     });
@@ -414,10 +429,13 @@ describe('updateDraft', () => {
       bodyValues: { '1': { value: 'Plain only' } },
     };
     const makeReq = mock.method(client, 'makeRequest', async (req: any) => {
-      if (req.methodCalls[0][0] === 'Email/get') {
-        return { methodResponses: [['Email/get', { list: [aliasedDraft] }, 'getEmail']] };
+      if (req.methodCalls[0][1].destroy) {
+        return { methodResponses: [['Email/set', { destroyed: ['draft-1'] }, 'removeOriginalDraft']] };
       }
-      return { methodResponses: [['Email/set', { created: { draft: { id: 'draft-2' } }, destroyed: ['draft-1'] }, 'updateDraft']] };
+      if (req.methodCalls[0][0] === 'Email/get') {
+        return { methodResponses: [['Email/get', { state: 'state-before', list: [aliasedDraft] }, 'getEmail']] };
+      }
+      return { methodResponses: [['Email/set', { newState: 'state-created', created: { draft: { id: 'draft-2' } } }, 'updateDraft']] };
     });
 
     await client.updateDraft('draft-1', { subject: 'New subject' });
@@ -435,10 +453,13 @@ describe('updateDraft', () => {
       bodyValues: { '1': { value: 'The text' }, '2': { value: '<p>The html</p>' } },
     };
     const makeReq = mock.method(client, 'makeRequest', async (req: any) => {
-      if (req.methodCalls[0][0] === 'Email/get') {
-        return { methodResponses: [['Email/get', { list: [dualDraft] }, 'getEmail']] };
+      if (req.methodCalls[0][1].destroy) {
+        return { methodResponses: [['Email/set', { destroyed: ['draft-1'] }, 'removeOriginalDraft']] };
       }
-      return { methodResponses: [['Email/set', { created: { draft: { id: 'draft-2' } }, destroyed: ['draft-1'] }, 'updateDraft']] };
+      if (req.methodCalls[0][0] === 'Email/get') {
+        return { methodResponses: [['Email/get', { state: 'state-before', list: [dualDraft] }, 'getEmail']] };
+      }
+      return { methodResponses: [['Email/set', { newState: 'state-created', created: { draft: { id: 'draft-2' } } }, 'updateDraft']] };
     });
 
     await client.updateDraft('draft-1', { subject: 'New subject' });
@@ -458,10 +479,13 @@ describe('updateDraft', () => {
       bodyValues: { '1': { value: 'The text' }, '2': { value: '<p>The html</p>' } },
     };
     const makeReq = mock.method(client, 'makeRequest', async (req: any) => {
-      if (req.methodCalls[0][0] === 'Email/get') {
-        return { methodResponses: [['Email/get', { list: [dualDraft] }, 'getEmail']] };
+      if (req.methodCalls[0][1].destroy) {
+        return { methodResponses: [['Email/set', { destroyed: ['draft-1'] }, 'removeOriginalDraft']] };
       }
-      return { methodResponses: [['Email/set', { created: { draft: { id: 'draft-2' } }, destroyed: ['draft-1'] }, 'updateDraft']] };
+      if (req.methodCalls[0][0] === 'Email/get') {
+        return { methodResponses: [['Email/get', { state: 'state-before', list: [dualDraft] }, 'getEmail']] };
+      }
+      return { methodResponses: [['Email/set', { newState: 'state-created', created: { draft: { id: 'draft-2' } } }, 'updateDraft']] };
     });
 
     await client.updateDraft('draft-1', { textBody: 'NEW text' });
@@ -470,6 +494,99 @@ describe('updateDraft', () => {
     assert.equal(emailObj.bodyValues.text.value, 'NEW text');
     assert.equal(emailObj.bodyValues.html.value, '<p>The html</p>');
   });
+});
+
+describe('updateDraft failure safety', () => {
+  // Model per-object JMAP semantics: a rejected create would NOT prevent an
+  // accompanying destroy from succeeding. This catches the original data loss.
+  function scenario(options: {
+    createError?: string;
+    createThrows?: boolean;
+    missingId?: boolean;
+    missingReadState?: boolean;
+    missingNewState?: boolean;
+    cleanupError?: string;
+    cleanupMethodError?: string;
+    cleanupThrows?: boolean;
+    missingDestroyed?: boolean;
+  } = {}) {
+    const client = makeClient();
+    const stored = new Set(['draft-1']);
+    const requests: any[] = [];
+    mock.method(client, 'makeRequest', async (req: any) => {
+      requests.push(req);
+      const [method, args, tag] = req.methodCalls[0];
+      if (method === 'Email/get') {
+        return { methodResponses: [[method, {
+          list: [EXISTING_DRAFT],
+          ...(!options.missingReadState && { state: 'state-before' }),
+        }, tag]] };
+      }
+      const result: any = {};
+      if (args.create) {
+        if (options.createThrows) throw new Error('Creation connection lost');
+        if (options.createError) result.notCreated = { draft: { type: options.createError } };
+        else if (!options.missingId) {
+          stored.add('draft-2');
+          result.created = { draft: { id: 'draft-2' } };
+        }
+        if (!options.missingNewState) result.newState = 'state-created';
+      }
+      if (args.destroy) {
+        if (options.cleanupThrows) throw new Error('Cleanup connection lost');
+        if (options.cleanupMethodError) {
+          return { methodResponses: [['error', { type: options.cleanupMethodError }, tag]] };
+        }
+        if (options.cleanupError) result.notDestroyed = { 'draft-1': { type: options.cleanupError } };
+        else if (!options.missingDestroyed) {
+          for (const id of args.destroy) stored.delete(id);
+          result.destroyed = args.destroy;
+        }
+      }
+      return { methodResponses: [[method, result, tag]] };
+    });
+    return { client, stored, requests };
+  }
+
+  for (const createError of ['overQuota', 'invalidProperties', 'blobNotFound']) {
+    it(`keeps the original when creation fails with ${createError}`, async () => {
+      const { client, stored, requests } = scenario({ createError });
+      await assert.rejects(client.updateDraft('draft-1', { subject: 'Edited' }), new RegExp(createError));
+      assert.deepEqual([...stored], ['draft-1']);
+      assert.ok(requests.every(r => !r.methodCalls[0][1].destroy));
+    });
+  }
+
+  for (const options of [{ createThrows: true }, { missingId: true }, { missingReadState: true }]) {
+    it(`never deletes the original on an unconfirmed creation: ${JSON.stringify(options)}`, async () => {
+      const { client, stored, requests } = scenario(options);
+      await assert.rejects(client.updateDraft('draft-1', { subject: 'Edited' }));
+      assert.deepEqual([...stored], ['draft-1']);
+      assert.ok(requests.every(r => !r.methodCalls[0][1].destroy));
+    });
+  }
+
+  for (const options of [
+    { missingNewState: true },
+    { cleanupError: 'forbidden' },
+    { cleanupMethodError: 'stateMismatch' },
+    { cleanupThrows: true },
+    { missingDestroyed: true },
+  ]) {
+    it(`reports the saved replacement and does not retry unsafe cleanup: ${JSON.stringify(options)}`, async () => {
+      const { client, stored, requests } = scenario(options);
+      await assert.rejects(client.updateDraft('draft-1', { subject: 'Edited' }), (error: Error) => {
+        assert.match(error.message, /Updated draft saved as 'draft-2'/);
+        assert.match(error.message, /original draft 'draft-1'/);
+        assert.match(error.message, /Do not repeat the edit automatically/);
+        return true;
+      });
+      assert.deepEqual([...stored], ['draft-1', 'draft-2']);
+      const cleanup = requests.filter(r => r.methodCalls[0][1].destroy);
+      assert.equal(cleanup.length, options.missingNewState ? 0 : 1);
+      if (cleanup.length) assert.equal(cleanup[0].methodCalls[0][1].ifInState, 'state-created');
+    });
+  }
 });
 
 // ---------- sendDraft ----------
@@ -1062,10 +1179,13 @@ describe('updateDraft replyTo', () => {
     };
 
     const makeReq = mock.method(client, 'makeRequest', async (req: any) => {
-      if (req.methodCalls[0][0] === 'Email/get') {
-        return { methodResponses: [['Email/get', { list: [existingWithReplyTo] }, 'getEmail']] };
+      if (req.methodCalls[0][1].destroy) {
+        return { methodResponses: [['Email/set', { destroyed: ['draft-1'] }, 'removeOriginalDraft']] };
       }
-      return { methodResponses: [['Email/set', { created: { draft: { id: 'draft-new' } }, destroyed: ['draft-1'] }, 'updateDraft']] };
+      if (req.methodCalls[0][0] === 'Email/get') {
+        return { methodResponses: [['Email/get', { state: 'state-before', list: [existingWithReplyTo] }, 'getEmail']] };
+      }
+      return { methodResponses: [['Email/set', { newState: 'state-created', created: { draft: { id: 'draft-new' } } }, 'updateDraft']] };
     });
 
     await client.updateDraft('draft-1', { replyTo: ['new-reply@example.com'] });
@@ -1081,10 +1201,13 @@ describe('updateDraft replyTo', () => {
     };
 
     const makeReq = mock.method(client, 'makeRequest', async (req: any) => {
-      if (req.methodCalls[0][0] === 'Email/get') {
-        return { methodResponses: [['Email/get', { list: [existingWithReplyTo] }, 'getEmail']] };
+      if (req.methodCalls[0][1].destroy) {
+        return { methodResponses: [['Email/set', { destroyed: ['draft-1'] }, 'removeOriginalDraft']] };
       }
-      return { methodResponses: [['Email/set', { created: { draft: { id: 'draft-new' } }, destroyed: ['draft-1'] }, 'updateDraft']] };
+      if (req.methodCalls[0][0] === 'Email/get') {
+        return { methodResponses: [['Email/get', { state: 'state-before', list: [existingWithReplyTo] }, 'getEmail']] };
+      }
+      return { methodResponses: [['Email/set', { newState: 'state-created', created: { draft: { id: 'draft-new' } } }, 'updateDraft']] };
     });
 
     await client.updateDraft('draft-1', { subject: 'Updated subject only' });
@@ -1171,10 +1294,13 @@ describe('updateDraft wildcard identity', () => {
   it('uses concrete from address when updating with wildcard identity', async () => {
     const existingWild = { ...EXISTING_DRAFT, from: [{ email: 'old@example.com' }] };
     const makeReq = mock.method(client, 'makeRequest', async (req: any) => {
-      if (req.methodCalls[0][0] === 'Email/get') {
-        return { methodResponses: [['Email/get', { list: [existingWild] }, 'getEmail']] };
+      if (req.methodCalls[0][1].destroy) {
+        return { methodResponses: [['Email/set', { destroyed: ['draft-1'] }, 'removeOriginalDraft']] };
       }
-      return { methodResponses: [['Email/set', { created: { draft: { id: 'draft-2' } }, destroyed: ['draft-1'] }, 'updateDraft']] };
+      if (req.methodCalls[0][0] === 'Email/get') {
+        return { methodResponses: [['Email/get', { state: 'state-before', list: [existingWild] }, 'getEmail']] };
+      }
+      return { methodResponses: [['Email/set', { newState: 'state-created', created: { draft: { id: 'draft-2' } } }, 'updateDraft']] };
     });
 
     await client.updateDraft('draft-1', { from: 'new@example.com' });
@@ -1186,10 +1312,13 @@ describe('updateDraft wildcard identity', () => {
   it('preserves concrete from when updating without changing from', async () => {
     const existingWild = { ...EXISTING_DRAFT, from: [{ email: 'work@example.com' }] };
     const makeReq = mock.method(client, 'makeRequest', async (req: any) => {
-      if (req.methodCalls[0][0] === 'Email/get') {
-        return { methodResponses: [['Email/get', { list: [existingWild] }, 'getEmail']] };
+      if (req.methodCalls[0][1].destroy) {
+        return { methodResponses: [['Email/set', { destroyed: ['draft-1'] }, 'removeOriginalDraft']] };
       }
-      return { methodResponses: [['Email/set', { created: { draft: { id: 'draft-2' } }, destroyed: ['draft-1'] }, 'updateDraft']] };
+      if (req.methodCalls[0][0] === 'Email/get') {
+        return { methodResponses: [['Email/get', { state: 'state-before', list: [existingWild] }, 'getEmail']] };
+      }
+      return { methodResponses: [['Email/set', { newState: 'state-created', created: { draft: { id: 'draft-2' } } }, 'updateDraft']] };
     });
 
     await client.updateDraft('draft-1', { subject: 'Changed subject only' });

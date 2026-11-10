@@ -818,7 +818,8 @@ export class JmapClient {
     };
 
     const getResponse = await this.makeRequest(getRequest);
-    const existingEmail = this.getListResult(getResponse, 0)[0];
+    const existingResult = this.getMethodResult(getResponse, 0);
+    const existingEmail = existingResult.list?.[0];
     if (!existingEmail) {
       throw new Error(`Email with ID '${emailId}' not found`);
     }
@@ -826,6 +827,9 @@ export class JmapClient {
     // Verify it's a draft
     if (!existingEmail.keywords?.$draft) {
       throw new Error('Cannot edit a non-draft email');
+    }
+    if (typeof existingResult.state !== 'string' || !existingResult.state) {
+      throw new Error('Draft update requires the Email/get state; original draft was not changed');
     }
 
     // Resolve identity
@@ -919,14 +923,16 @@ export class JmapClient {
       emailObject.attachments = [...carriedAttachments, ...newAttachments];
     }
 
-    // Atomic create + destroy in a single Email/set call
+    // JMAP /set is atomic per object, not per method call (RFC 8620 §5.3).
+    // Never destroy the original in the create request: creation can fail
+    // independently (e.g. overQuota) while destruction succeeds.
     const request: JmapRequest = {
       using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
       methodCalls: [
         ['Email/set', {
           accountId: session.accountId,
+          ifInState: existingResult.state,
           create: { draft: emailObject },
-          destroy: [emailId],
         }, 'updateDraft']
       ]
     };
@@ -940,8 +946,40 @@ export class JmapClient {
     }
 
     const newEmailId = result.created?.draft?.id;
-    if (!newEmailId) {
-      throw new Error('Draft update returned no email ID');
+    if (typeof newEmailId !== 'string' || !newEmailId || newEmailId === emailId) {
+      throw new Error('Draft update returned no valid replacement email ID; original draft was not deleted');
+    }
+
+    // The create response's state includes our new draft. If anything changes
+    // before cleanup, fail closed and keep both drafts instead of discarding
+    // a concurrent edit. Never retry cleanup without the state precondition.
+    try {
+      if (typeof result.newState !== 'string' || !result.newState) {
+        throw new Error('Email/set response is missing newState');
+      }
+      const cleanupResponse = await this.makeRequest({
+        using: ['urn:ietf:params:jmap:core', 'urn:ietf:params:jmap:mail'],
+        methodCalls: [
+          ['Email/set', {
+            accountId: session.accountId,
+            ifInState: result.newState,
+            destroy: [emailId],
+          }, 'removeOriginalDraft'],
+        ],
+      });
+      const cleanup = this.getMethodResult(cleanupResponse, 0);
+      if (cleanup.notDestroyed?.[emailId]) {
+        throw new Error(`Original draft deletion failed: ${cleanup.notDestroyed[emailId].type}`);
+      }
+      if (!Array.isArray(cleanup.destroyed) || !cleanup.destroyed.includes(emailId)) {
+        throw new Error('Original draft deletion was not acknowledged');
+      }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `Updated draft saved as '${newEmailId}', but deletion of original draft '${emailId}' was not confirmed. ` +
+        `Do not repeat the edit automatically; inspect these draft IDs before retrying cleanup. ${reason}`,
+      );
     }
 
     return newEmailId;
